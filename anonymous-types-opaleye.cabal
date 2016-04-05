@@ -1,0 +1,47 @@
+name:           anonymous-types-opaleye
+version:        0.1
+synopsis:       Boilerplate for using anonymous-types with Opaleye
+license:        MPL-2.0
+license-file:   LICENSE
+author:         Shane O'Brien
+maintainer:     shane@duairc.com
+stability:      Experimental
+category:       Type
+cabal-version:  >= 1.6
+build-type:     Simple
+homepage:       https://github.com/duairc/anonymous-types
+bug-reports:    https://github.com/duairc/anonymous-types/issues
+
+extra-source-files:
+  LICENSE
+
+library
+  hs-source-dirs:
+    src
+
+  exposed-modules:
+    Data.Anonymous.Opaleye
+
+  build-depends:
+    aeson,
+    anonymous-types >= 0.1 && < 0.2,
+    anonymous-types-product-profunctors >= 0.1 && < 0.2,
+    base >= 4.9 && < 5,
+    bytestring,
+    case-insensitive,
+    opaleye >= 0.4 && < 0.5,
+    product-profunctors >= 0.5 && < 0.8,
+    profunctors >= 3.1.1 && < 6,
+    tagged,
+    text,
+    time,
+    uuid
+
+  if impl(ghc < 7.10)
+    build-depends: transformers > 0.2 && < 0.6
+
+  ghc-options: -Wall
+
+source-repository head
+  type:     git
+  location: https://github.com/duairc/anonymous-types.git
