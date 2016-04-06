@@ -18,6 +18,8 @@
 
 module Data.Anonymous.Opaleye
     ( PG
+    , pg
+    , PGRep
     , PGScalar
     , Table'
     , table
