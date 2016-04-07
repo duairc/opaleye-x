@@ -17,10 +17,14 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Data.Anonymous.Opaleye
-    ( PG
+    ( PGRun
+    , PG
+    , UnPG
+    , run
+    , PGLift
     , pg
-    , PGRep
     , PGScalar
+    , UnPGScalar
     , Table'
     , table
     , required
@@ -52,6 +56,7 @@ import           Control.Applicative (Const (Const))
 import           Data.Functor.Identity (Identity (Identity))
 import           Data.Int (Int16, Int32, Int64)
 import           Data.Proxy (Proxy (Proxy))
+import           Data.Typeable (Typeable)
 import           GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 
@@ -66,7 +71,8 @@ import           Data.CaseInsensitive (CI)
 -- opaleye -------------------------------------------------------------------
 import           Opaleye.Column (Column, Nullable, maybeToNullable)
 import           Opaleye.PGTypes
-                     ( PGBool
+                     ( PGArray
+                     , PGBool
                      , PGBytea
                      , PGCitext
                      , PGDate
@@ -94,12 +100,26 @@ import           Opaleye.PGTypes
                      , pgUTCTime
                      , pgValueJSONB
                      )
+import           Opaleye.QueryArr (Query)
+import           Opaleye.RunQuery
+                     ( QueryRunner
+                     , QueryRunnerColumnDefault
+                     , runQuery
+                     )
 import           Opaleye.Table (Table (Table), TableProperties)
 import qualified Opaleye.Table as O (optional, required)
 
 
+-- postgresql-simple ---------------------------------------------------------
+import           Database.PostgreSQL.Simple (Connection)
+
+
 -- profunctors ---------------------------------------------------------------
 import           Data.Profunctor (dimap)
+
+
+-- product-profunctors -------------------------------------------------------
+import           Data.Profunctor.Product.Default (Default)
 
 
 -- tagged --------------------------------------------------------------------
@@ -121,407 +141,504 @@ import           Data.UUID (UUID)
 
 
 ------------------------------------------------------------------------------
-required
-    :: forall s a. KnownSymbol s
-    => Uncurry Field '(s, TableProperties (Column a) (Column a))
-required = Uncurry (Field (O.required (symbolVal (Proxy :: Proxy s))))
+class (PG a ~ p, UnPG p ~ a, Default QueryRunner p a) =>
+    PGRun a p | p -> a, a -> p
+  where
+    type PG a :: *
+    type UnPG p :: *
+    run :: Connection -> Query p -> IO [a]
+    run = runQuery
 
 
 ------------------------------------------------------------------------------
-optional
-    :: forall s a. KnownSymbol s
-    => Uncurry Field '(s, TableProperties (Maybe (Column a)) (Column a))
-optional = Uncurry (Field (O.optional (symbolVal (Proxy :: Proxy s))))
+class PGRun a p => PGLift a p | p -> a, a -> p where
+    pg :: a -> p
 
 
 ------------------------------------------------------------------------------
-class PG a where
-    type PGRep a :: *
-    pg :: a -> PGRep a
+instance PGRun a p => PGRun (Const a b) (Const p b) where
+    type PG (Const a b) = Const (PG a) b
+    type UnPG (Const p b) = Const (UnPG p) b
 
 
 ------------------------------------------------------------------------------
-instance PG a => PG (Const a b) where
-    type PGRep (Const a b) = Const (PGRep a) b
+instance PGLift a p => PGLift (Const a b) (Const p b) where
     pg (Const a) = Const (pg a)
 
 
 ------------------------------------------------------------------------------
-instance PG a => PG (Identity a) where
-    type PGRep (Identity a) = Identity (PGRep a)
+instance PGRun a p => PGRun (Identity a) (Identity p) where
+    type PG (Identity a) = Identity (PG a)
+    type UnPG (Identity a) = Identity (UnPG a)
+
+
+------------------------------------------------------------------------------
+instance PGLift a p => PGLift (Identity a) (Identity p) where
     pg (Identity a) = Identity (pg a)
 
 
 ------------------------------------------------------------------------------
-instance PG a => PG (Tagged s a) where
-    type PGRep (Tagged s a) = Tagged s (PGRep a)
+instance PGRun a p => PGRun (Tagged s a) (Tagged s p) where
+    type PG (Tagged s a) = Tagged s (PG a)
+    type UnPG (Tagged s p) = Tagged s (UnPG p)
+
+
+------------------------------------------------------------------------------
+instance PGLift a p => PGLift (Tagged s a) (Tagged s p) where
     pg (Tagged a) = Tagged (pg a)
 
 
 ------------------------------------------------------------------------------
-instance PG a => PG (Field s a) where
-    type PGRep (Field s a) = Field s (PGRep a)
+instance (KnownSymbol s, PGRun a p) => PGRun (Field s a) (Field s p) where
+    type PG (Field s a) = Field s (PG a)
+    type UnPG (Field s p) = Field s (UnPG p)
+
+
+------------------------------------------------------------------------------
+instance (KnownSymbol s, PGLift a p) => PGLift (Field s a) (Field s p) where
     pg (Field a) = Field (pg a)
 
 
 ------------------------------------------------------------------------------
-instance PG () where
-    type PGRep () = ()
+instance PGRun () () where
+    type PG () = ()
+    type UnPG () = ()
+
+
+------------------------------------------------------------------------------
+instance PGLift () () where
     pg () = ()
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG b) => PG (a, b) where
-    type PGRep (a, b) = (PGRep a, PGRep b)
+instance (PGRun a pa, PGRun b pb) => PGRun (a, b) (pa, pb) where
+    type PG (a, b) = (PG a, PG b)
+    type UnPG (pa, pb) = (UnPG pa, UnPG pb)
+
+
+------------------------------------------------------------------------------
+instance (PGLift a pa, PGLift b pb) => PGLift (a, b) (pa, pb) where
     pg (a, b) = (pg a, pg b)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG b, PG c) => PG (a, b, c) where
-    type PGRep (a, b, c) = (PGRep a, PGRep b, PGRep c)
+instance (PGRun a pa, PGRun b pb, PGRun c pc) => PGRun (a, b, c) (pa, pb, pc)
+  where
+    type PG (a, b, c) = (PG a, PG b, PG c)
+    type UnPG (pa, pb, pc) = (UnPG pa, UnPG pb, UnPG pc)
+
+
+------------------------------------------------------------------------------
+instance (PGLift a pa, PGLift b pb, PGLift c pc) =>
+    PGLift (a, b, c) (pa, pb, pc)
+  where
     pg (a, b, c) = (pg a, pg b, pg c)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG b, PG c, PG d) => PG (a, b, c, d) where
-    type PGRep (a, b, c, d) = (PGRep a, PGRep b, PGRep c, PGRep d)
+instance (PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd) =>
+    PGRun (a, b, c, d) (pa, pb, pc, pd)
+  where
+    type PG (a, b, c, d) = (PG a, PG b, PG c, PG d)
+    type UnPG (pa, pb, pc, pd) = (UnPG pa, UnPG pb, UnPG pc, UnPG pd)
+
+
+------------------------------------------------------------------------------
+instance (PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd) =>
+    PGLift (a, b, c, d) (pa, pb, pc, pd)
+  where
     pg (a, b, c, d) = (pg a, pg b, pg c, pg d)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG b, PG c, PG d, PG e) => PG (a, b, c, d, e) where
-    type PGRep (a, b, c, d, e) = (PGRep a, PGRep b, PGRep c, PGRep d, PGRep e)
+instance (PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe) =>
+    PGRun (a, b, c, d, e) (pa, pb, pc, pd, pe)
+  where
+    type PG (a, b, c, d, e) = (PG a, PG b, PG c, PG d, PG e)
+    type UnPG (pa, pb, pc, pd, pe) =
+        (UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe)
+
+
+------------------------------------------------------------------------------
+instance (PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe) =>
+    PGLift (a, b, c, d, e) (pa, pb, pc, pd, pe)
+  where
     pg (a, b, c, d, e) = (pg a, pg b, pg c, pg d, pg e)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG b, PG c, PG d, PG e, PG f) => PG (a, b, c, d, e, f) where
-    type PGRep (a, b, c, d, e, f) =
-        (PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f)
+instance
+    (PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe, PGRun f pf)
+  =>
+    PGRun (a, b, c, d, e, f) (pa, pb, pc, pd, pe, pf)
+  where
+    type PG (a, b, c, d, e, f) = (PG a, PG b, PG c, PG d, PG e, PG f)
+    type UnPG (pa, pb, pc, pd, pe, pf) =
+        (UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe, UnPG pf)
+
+
+------------------------------------------------------------------------------
+instance
+    ( PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe
+    , PGLift f pf
+    )
+  =>
+    PGLift (a, b, c, d, e, f) (pa, pb, pc, pd, pe, pf)
+  where
     pg (a, b, c, d, e, f) = (pg a, pg b, pg c, pg d, pg e, pg f)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG b, PG c, PG d, PG e, PG f, PG g) =>
-    PG (a, b, c, d, e, f, g)
+instance
+    ( PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe, PGRun f pf
+    , PGRun g pg
+    )
+  =>
+    PGRun (a, b, c, d, e, f, g) (pa, pb, pc, pd, pe, pf, pg)
   where
-    type PGRep (a, b, c, d, e, f, g) =
-        (PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g)
+    type PG (a, b, c, d, e, f, g) = (PG a, PG b, PG c, PG d, PG e, PG f, PG g)
+    type UnPG (pa, pb, pc, pd, pe, pf, pg) =
+        (UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe, UnPG pf, UnPG pg)
+
+
+------------------------------------------------------------------------------
+instance
+    ( PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe
+    , PGLift f pf, PGLift g pg
+    )
+  =>
+    PGLift (a, b, c, d, e, f, g) (pa, pb, pc, pd, pe, pf, pg)
+  where
     pg (a, b, c, d, e, f, g) = (pg a, pg b, pg c, pg d, pg e, pg f, pg g)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h) =>
-    PG (a, b, c, d, e, f, g, h)
+instance
+    ( PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe, PGRun f pf
+    , PGRun g pg, PGRun h ph
+    )
+  =>
+    PGRun (a, b, c, d, e, f, g, h) (pa, pb, pc, pd, pe, pf, pg, ph)
   where
-    type PGRep (a, b, c, d, e, f, g, h) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h
+    type PG (a, b, c, d, e, f, g, h) =
+        (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h)
+    type UnPG (pa, pb, pc, pd, pe, pf, pg, ph) =
+        ( UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe, UnPG pf, UnPG pg
+        , UnPG ph
         )
+
+
+------------------------------------------------------------------------------
+instance
+    ( PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe
+    , PGLift f pf, PGLift g pg, PGLift h ph
+    )
+  =>
+    PGLift (a, b, c, d, e, f, g, h) (pa, pb, pc, pd, pe, pf, pg, ph)
+  where
     pg (a, b, c, d, e, f, g, h) =
         (pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i) =>
-    PG (a, b, c, d, e, f, g, h, i)
+instance
+    ( PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe, PGRun f pf
+    , PGRun g pg, PGRun h ph, PGRun i pi
+    )
+  =>
+    PGRun (a, b, c, d, e, f, g, h, i) (pa, pb, pc, pd, pe, pf, pg, ph, pi)
   where
-    type PGRep (a, b, c, d, e, f, g, h, i) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i
+    type PG (a, b, c, d, e, f, g, h, i) =
+        (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i)
+    type UnPG (pa, pb, pc, pd, pe, pf, pg, ph, pi) =
+        ( UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe, UnPG pf, UnPG pg
+        , UnPG ph, UnPG pi
         )
+
+
+------------------------------------------------------------------------------
+instance
+    ( PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe
+    , PGLift f pf, PGLift g pg, PGLift h ph, PGLift i pi
+    )
+  =>
+    PGLift (a, b, c, d, e, f, g, h, i) (pa, pb, pc, pd, pe, pf, pg, ph, pi)
+  where
     pg (a, b, c, d, e, f, g, h, i) =
         (pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j) =>
-    PG (a, b, c, d, e, f, g, h, i, j)
+instance
+    ( PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe, PGRun f pf
+    , PGRun g pg, PGRun h ph, PGRun i pi, PGRun j pj
+    )
+  =>
+    PGRun
+        (a, b, c, d, e, f, g, h, i, j)
+        (pa, pb, pc, pd, pe, pf, pg, ph, pi, pj)
   where
-    type PGRep (a, b, c, d, e, f, g, h, i, j) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j
+    type PG (a, b, c, d, e, f, g, h, i, j) =
+        (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j)
+    type UnPG (pa, pb, pc, pd, pe, pf, pg, ph, pi, pj) =
+        ( UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe, UnPG pf, UnPG pg
+        , UnPG ph, UnPG pi, UnPG pj
         )
+
+
+------------------------------------------------------------------------------
+instance
+    ( PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe
+    , PGLift f pf, PGLift g pg, PGLift h ph, PGLift i pi, PGLift j pj
+    )
+  =>
+    PGLift
+        (a, b, c, d, e, f, g, h, i, j)
+        (pa, pb, pc, pd, pe, pf, pg, ph, pi, pj)
+  where
     pg (a, b, c, d, e, f, g, h, i, j) =
         (pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k) =>
-    PG (a, b, c, d, e, f, g, h, i, j, k)
-  where
-    type PGRep (a, b, c, d, e, f, g, h, i, j, k) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j, PGRep k
-        )
-    pg (a, b, c, d, e, f, g, h, i, j, k) =
-        (pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j, pg k)
+instance PGRun (Product g '[]) (Product g '[]) where
+    type PG (Product g '[]) = Product g '[]
+    type UnPG (Product g '[]) = Product g '[]
 
 
 ------------------------------------------------------------------------------
-instance
-    (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k, PG l)
-  =>
-    PG (a, b, c, d, e, f, g, h, i, j, k, l)
-  where
-    type PGRep (a, b, c, d, e, f, g, h, i, j, k, l) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j, PGRep k, PGRep l
-        )
-    pg (a, b, c, d, e, f, g, h, i, j, k, l) =
-        ( pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j, pg k
-        , pg l
-        )
-
-
-------------------------------------------------------------------------------
-instance
-    ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k, PG l
-    , PG m
-    )
-  =>
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m)
-  where
-    type PGRep (a, b, c, d, e, f, g, h, i, j, k, l, m) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j, PGRep k, PGRep l, PGRep m
-        )
-    pg (a, b, c, d, e, f, g, h, i, j, k, l, m) =
-        ( pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j, pg k
-        , pg l, pg m
-        )
-
-
-------------------------------------------------------------------------------
-instance
-    ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k, PG l
-    , PG m, PG n
-    )
-  =>
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n)
-  where
-    type PGRep (a, b, c, d, e, f, g, h, i, j, k, l, m, n) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j, PGRep k, PGRep l, PGRep m, PGRep n
-        )
-    pg (a, b, c, d, e, f, g, h, i, j, k, l, m, n) =
-        ( pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j, pg k
-        , pg l, pg m, pg n
-        )
-
-
-------------------------------------------------------------------------------
-instance
-    ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k, PG l
-    , PG m, PG n, PG o
-    )
-  =>
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o)
-  where
-    type PGRep (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j, PGRep k, PGRep l, PGRep m, PGRep n
-        , PGRep o
-        )
-    pg (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) =
-        ( pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j, pg k
-        , pg l, pg m, pg n, pg o
-        )
-
-
-------------------------------------------------------------------------------
-instance
-    ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k, PG l
-    , PG m, PG n, PG o, PG p
-    )
-  =>
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p)
-  where
-    type PGRep (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j, PGRep k, PGRep l, PGRep m, PGRep n
-        , PGRep o, PGRep p
-        )
-    pg (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) =
-        ( pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j, pg k
-        , pg l, pg m, pg n, pg o, pg p
-        )
-
-
-------------------------------------------------------------------------------
-instance
-    ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k, PG l
-    , PG m, PG n, PG o, PG p, PG q
-    )
-  =>
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q)
-  where
-    type PGRep (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j, PGRep k, PGRep l, PGRep m, PGRep n
-        , PGRep o, PGRep p, PGRep q
-        )
-    pg (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q) =
-        ( pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j, pg k
-        , pg l, pg m, pg n, pg o, pg p, pg q
-        )
-
-
-------------------------------------------------------------------------------
-instance
-    ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k, PG l
-    , PG m, PG n, PG o, PG p, PG q, PG r
-    )
-  =>
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r)
-  where
-    type PGRep (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j, PGRep k, PGRep l, PGRep m, PGRep n
-        , PGRep o, PGRep p, PGRep q, PGRep r
-        )
-    pg (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r) =
-        ( pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j, pg k
-        , pg l, pg m, pg n, pg o, pg p, pg q, pg r
-        )
-
-
-------------------------------------------------------------------------------
-instance
-    ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k, PG l
-    , PG m, PG n, PG o, PG p, PG q, PG r, PG s
-    )
-  =>
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s)
-  where
-    type PGRep (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j, PGRep k, PGRep l, PGRep m, PGRep n
-        , PGRep o, PGRep p, PGRep q, PGRep r, PGRep s
-        )
-    pg (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s) =
-        ( pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j, pg k
-        , pg l, pg m, pg n, pg o, pg p, pg q, pg r, pg s
-        )
-
-
-------------------------------------------------------------------------------
-instance
-    ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k, PG l
-    , PG m, PG n, PG o, PG p, PG q, PG r, PG s, PG t
-    )
-  =>
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t)
-  where
-    type PGRep (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t) =
-        ( PGRep a, PGRep b, PGRep c, PGRep d, PGRep e, PGRep f, PGRep g
-        , PGRep h, PGRep i, PGRep j, PGRep k, PGRep l, PGRep m, PGRep n
-        , PGRep o, PGRep p, PGRep q, PGRep r, PGRep s, PGRep t
-        )
-    pg (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t) =
-        ( pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j, pg k
-        , pg l, pg m, pg n, pg o, pg p, pg q, pg r, pg s, pg t
-        )
-
-
-------------------------------------------------------------------------------
-instance PG (Product g '[]) where
-    type PGRep (Product g '[]) = Product g '[]
+instance PGLift (Product g '[]) (Product g '[]) where
     pg Nil = Nil
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG (Tuple as), PGRep (Tuple as) ~ Tuple (PGMap as)) =>
-    PG (Tuple (a ': as))
+instance
+    ( PGRun a p
+    , PGRun (Tuple as) (Tuple ps)
+    , PG (Tuple as) ~ Tuple (PGMap as)
+    , UnPG (Tuple ps) ~ Tuple (UnPGMap ps)
+    )
+  =>
+    PGRun (Tuple (a ': as)) (Tuple (p ': ps))
   where
-    type PGRep (Tuple (a ': as)) = Tuple ((PGRep a ': PGMap as))
+    type PG (Tuple (a ': as)) = Tuple (PG a ': PGMap as)
+    type UnPG (Tuple (p ': ps)) = Tuple (UnPG p ': UnPGMap ps)
+
+
+------------------------------------------------------------------------------
+instance
+    ( PGLift a p
+    , PGLift (Tuple as) (Tuple ps)
+    , PG (Tuple as) ~ Tuple (PGMap as)
+    , UnPG (Tuple ps) ~ Tuple (UnPGMap ps)
+    )
+  =>
+    PGLift (Tuple (a ': as)) (Tuple (p ': ps))
+  where
     pg (Cons (Identity a) as) = Cons (Identity (pg a)) (pg as)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PG (Record as), PGRep (Record as) ~ Record (PGMapSnd as)) =>
-    PG (Record ('(s, a) ': as))
+instance
+    ( PGRun a p
+    , PGRun (Record as) (Record ps)
+    , PG (Record as) ~ Record (PGMapSnd as)
+    , UnPG (Record ps) ~ Record (UnPGMapSnd ps)
+    , KnownSymbol s
+    )
+  =>
+    PGRun (Record ('(s, a) ': as)) (Record ('(s, p) ': ps))
   where
-    type PGRep (Record ('(s, a) ': as)) =
-        Record ('(s, PGRep a) ': PGMapSnd as)
+    type PG (Record ('(s, a) ': as)) = Record ('(s, PG a) ': PGMapSnd as)
+    type UnPG (Record ('(s, p) ': ps)) =
+        Record ('(s, UnPG p) ': UnPGMapSnd ps)
+
+
+------------------------------------------------------------------------------
+instance
+    ( PGLift a p
+    , PGLift (Record as) (Record ps)
+    , PG (Record as) ~ Record (PGMapSnd as)
+    , UnPG (Record ps) ~ Record (UnPGMapSnd ps)
+    , KnownSymbol s
+    )
+  =>
+    PGLift (Record ('(s, a) ': as)) (Record ('(s, p) ': ps))
+  where
     pg (Cons (Uncurry (Field a)) as) = Cons (Uncurry (Field (pg a))) (pg as)
 
 
 ------------------------------------------------------------------------------
-instance (PG a, PGRep a ~ Column (PGScalar a)) => PG (Maybe a) where
-    type PGRep (Maybe a) = Column (Nullable (PGScalar a))
+instance
+    ( PGRun a (Column p)
+    , p ~ PGScalar a
+    , a ~ UnPGScalar p
+    , QueryRunnerColumnDefault p a
+    )
+  =>
+    PGRun (Maybe a) (Column (Nullable p))
+  where
+    type PG (Maybe a) = Column (Nullable (PGScalar a))
+    type UnPG (Column (Nullable p)) = Maybe (UnPGScalar p)
+
+
+------------------------------------------------------------------------------
+instance
+    ( PGLift a (Column p)
+    , p ~ PGScalar a
+    , a ~ UnPGScalar p
+    , QueryRunnerColumnDefault p a
+    )
+  =>
+    PGLift (Maybe a) (Column (Nullable p))
+  where
     pg = maybeToNullable . fmap pg
 
 
 ------------------------------------------------------------------------------
-instance PG Bool where
-    type PGRep Bool = Column PGBool
+instance
+    ( PGRun a (Column p)
+    , p ~ PGScalar a
+    , a ~ UnPGScalar p
+    , QueryRunnerColumnDefault p a
+    , Typeable a
+    )
+  =>
+    PGRun [a] (Column (PGArray p))
+  where
+    type PG [a] = Column (PGArray (PGScalar a))
+    type UnPG (Column (PGArray p)) = [UnPGScalar p]
+
+
+------------------------------------------------------------------------------
+instance PGRun Bool (Column PGBool) where
+    type PG Bool = Column PGBool
+    type UnPG (Column PGBool) = Bool
+
+
+------------------------------------------------------------------------------
+instance PGLift Bool (Column PGBool) where
     pg = pgBool
 
 
 ------------------------------------------------------------------------------
-instance PG ByteString where
-    type PGRep ByteString = Column PGBytea
+instance PGRun ByteString (Column PGBytea) where
+    type PG ByteString = Column PGBytea
+    type UnPG (Column PGBytea) = ByteString
+
+
+------------------------------------------------------------------------------
+instance PGLift ByteString (Column PGBytea) where
     pg = pgStrictByteString
 
 
 ------------------------------------------------------------------------------
-instance PG (CI Text) where
-    type PGRep (CI Text) = Column PGCitext
+instance PGRun (CI Text) (Column PGCitext) where
+    type PG (CI Text) = Column PGCitext
+    type UnPG (Column PGCitext) = CI Text
+
+
+------------------------------------------------------------------------------
+instance PGLift (CI Text) (Column PGCitext) where
     pg = pgCiStrictText
 
 
 ------------------------------------------------------------------------------
-instance PG Day where
-    type PGRep Day = Column PGDate
+instance PGRun Day (Column PGDate) where
+    type PG Day = Column PGDate
+    type UnPG (Column PGDate) = Day
+
+
+------------------------------------------------------------------------------
+instance PGLift Day (Column PGDate) where
     pg = pgDay
 
 
 ------------------------------------------------------------------------------
-instance PG Double where
-    type PGRep Double = Column PGFloat8
+instance PGRun Double (Column PGFloat8) where
+    type PG Double = Column PGFloat8
+    type UnPG (Column PGFloat8) = Double
+
+
+------------------------------------------------------------------------------
+instance PGLift Double (Column PGFloat8) where
     pg = pgDouble
 
 
 ------------------------------------------------------------------------------
-instance PG Int32 where
-    type PGRep Int32 = Column PGInt4
+instance PGRun Int32 (Column PGInt4) where
+    type PG Int32 = Column PGInt4
+    type UnPG (Column PGInt4) = Int32
+
+
+------------------------------------------------------------------------------
+instance PGLift Int32 (Column PGInt4) where
     pg = pgInt4 . fromIntegral
 
 
 ------------------------------------------------------------------------------
-instance PG Int64 where
-    type PGRep Int64 = Column PGInt8
+instance PGRun Int64 (Column PGInt8) where
+    type PG Int64 = Column PGInt8
+    type UnPG (Column PGInt8) = Int64
+
+
+------------------------------------------------------------------------------
+instance PGLift Int64 (Column PGInt8) where
     pg = pgInt8
 
 
 ------------------------------------------------------------------------------
-instance PG LocalTime where
-    type PGRep LocalTime = Column PGTimestamp
+instance PGRun LocalTime (Column PGTimestamp) where
+    type PG LocalTime = Column PGTimestamp
+    type UnPG (Column PGTimestamp) = LocalTime
+
+
+------------------------------------------------------------------------------
+instance PGLift LocalTime (Column PGTimestamp) where
     pg = pgLocalTime
 
 
 ------------------------------------------------------------------------------
-instance PG Text where
-    type PGRep Text = Column PGText
+instance PGRun Text (Column PGText) where
+    type PG Text = Column PGText
+    type UnPG (Column PGText) = Text
+
+
+------------------------------------------------------------------------------
+instance PGLift Text (Column PGText) where
     pg = pgStrictText
 
 
 ------------------------------------------------------------------------------
-instance PG TimeOfDay where
-    type PGRep TimeOfDay = Column PGTime
+instance PGRun TimeOfDay (Column PGTime) where
+    type PG TimeOfDay = Column PGTime
+    type UnPG (Column PGTime) = TimeOfDay
+
+
+------------------------------------------------------------------------------
+instance PGLift TimeOfDay (Column PGTime) where
     pg = pgTimeOfDay
 
 
 ------------------------------------------------------------------------------
-instance PG UTCTime where
-    type PGRep UTCTime = Column PGTimestamptz
+instance PGRun UTCTime (Column PGTimestamptz) where
+    type PG UTCTime = Column PGTimestamptz
+    type UnPG (Column PGTimestamptz) = UTCTime
+
+
+------------------------------------------------------------------------------
+instance PGLift UTCTime (Column PGTimestamptz) where
     pg = pgUTCTime
 
 
 ------------------------------------------------------------------------------
-instance PG Value where
-    type PGRep Value = Column PGJsonb
+instance PGRun Value (Column PGJsonb) where
+    type PG Value = Column PGJsonb
+    type UnPG (Column PGJsonb) = Value
+
+
+------------------------------------------------------------------------------
+instance PGLift Value (Column PGJsonb) where
     pg = pgValueJSONB
 
 
@@ -542,90 +659,63 @@ type instance PGScalar TimeOfDay = PGTime
 type instance PGScalar UTCTime = PGTimestamptz
 type instance PGScalar UUID = PGUuid
 type instance PGScalar Value = PGJsonb
-type instance PGScalar (Maybe a) = Nullable (PGScalar a)
 
 
-{-
 ------------------------------------------------------------------------------
-type family PG (a :: *) :: * where
-    PG (Const a b) = Const (PG a) b
-    PG (Identity a) = Identity (PG a)
-    PG (Tagged s a) = Tagged s (PG a)
-    PG () = ()
-    PG (a, b) = (PG a, PG b)
-    PG (a, b, c) = (PG a, PG b, PG c)
-    PG (a, b, c, d) = (PG a, PG b, PG c, PG d)
-    PG (a, b, c, d, e) = (PG a, PG b, PG c, PG d, PG e)
-    PG (a, b, c, d, e, f) = (PG a, PG b, PG c, PG d, PG e, PG f)
-    PG (a, b, c, d, e, f, g) = (PG a, PG b, PG c, PG d, PG e, PG f, PG g)
-    PG (a, b, c, d, e, f, g, h) =
-        (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h)
-    PG (a, b, c, d, e, f, g, h, i) =
-        (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i)
-    PG (a, b, c, d, e, f, g, h, i, j) =
-        (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j)
-    PG (a, b, c, d, e, f, g, h, i, j, k) =
-        (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k)
-    PG (a, b, c, d, e, f, g, h, i, j, k, l) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l
-        )
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l, PG m
-        )
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l, PG m, PG n
-        )
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l, PG m, PG n, PG o
-        )
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l, PG m, PG n, PG o, PG p
-        )
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l, PG m, PG n, PG o, PG p, PG q
-        )
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l, PG m, PG n, PG o, PG p, PG q, PG r
-        )
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l, PG m, PG n, PG o, PG p, PG q, PG r, PG s
-        )
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l, PG m, PG n, PG o, PG p, PG q, PG r, PG s, PG t
-        )
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l, PG m, PG n, PG o, PG p, PG q, PG r, PG s, PG t, PG u
-        )
-    PG (a, b, c, d, e, f, g, h, i, j, k, l, m, n, o, p, q, r, s, t, u, v) =
-        ( PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j, PG k
-        , PG l, PG m, PG n, PG o, PG p, PG q, PG r, PG s, PG t, PG u, PG v
-        )
-    PG (Tuple as) = Tuple (PGMap as)
-    PG (Record as) = Record (PGMapSnd as)
-    PG a = Column (PGScalar a)
--}
+type family UnPGScalar (a :: *) :: *
+type instance UnPGScalar PGBool = Bool
+type instance UnPGScalar PGBytea = ByteString
+type instance UnPGScalar PGCitext = (CI Text)
+type instance UnPGScalar PGDate = Day
+type instance UnPGScalar PGFloat8 = Double
+type instance UnPGScalar PGFloat4 = Float
+type instance UnPGScalar PGInt2 = Int16
+type instance UnPGScalar PGInt4 = Int32
+type instance UnPGScalar PGInt8 = Int64
+type instance UnPGScalar PGTimestamp = LocalTime
+type instance UnPGScalar PGText = Text
+type instance UnPGScalar PGTime = TimeOfDay
+type instance UnPGScalar PGTimestamptz = UTCTime
+type instance UnPGScalar PGUuid = UUID
+type instance UnPGScalar PGJsonb = Value
 
 
 ------------------------------------------------------------------------------
 type family PGMap (as :: [*]) :: [*] where
     PGMap '[] = '[]
-    PGMap (a ': as) = PGRep a ': PGMap as
+    PGMap (a ': as) = PG a ': PGMap as
 
 
 ------------------------------------------------------------------------------
 type family PGMapSnd (as :: [(s, *)]) :: [(s, *)] where
     PGMapSnd '[] = '[]
-    PGMapSnd ('(s, a) ': as) = '(s, PGRep a) ': PGMapSnd as
+    PGMapSnd ('(s, a) ': as) = '(s, PG a) ': PGMapSnd as
+
+
+------------------------------------------------------------------------------
+type family UnPGMap (as :: [*]) :: [*] where
+    UnPGMap '[] = '[]
+    UnPGMap (a ': as) = UnPG a ': UnPGMap as
+
+
+------------------------------------------------------------------------------
+type family UnPGMapSnd (as :: [(s, *)]) :: [(s, *)] where
+    UnPGMapSnd '[] = '[]
+    UnPGMapSnd ('(s, a) ': as) = '(s, UnPG a) ': UnPGMapSnd as
+
+
+------------------------------------------------------------------------------
+required
+    :: forall s a. KnownSymbol s
+    => Uncurry Field '(s, TableProperties (Column a) (Column a))
+required = Uncurry (Field (O.required (symbolVal (Proxy :: Proxy s))))
+
+
+------------------------------------------------------------------------------
+optional
+    :: forall s a. KnownSymbol s
+    => Uncurry Field '(s, TableProperties (Maybe (Column a)) (Column a))
+optional = Uncurry (Field (O.optional (symbolVal (Proxy :: Proxy s))))
 
 
 ------------------------------------------------------------------------------

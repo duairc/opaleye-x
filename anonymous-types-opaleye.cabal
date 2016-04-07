@@ -30,6 +30,7 @@ library
     bytestring,
     case-insensitive,
     opaleye >= 0.4 && < 0.5,
+    postgresql-simple,
     product-profunctors >= 0.5 && < 0.8,
     profunctors >= 3.1.1 && < 6,
     tagged,
