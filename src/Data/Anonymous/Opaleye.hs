@@ -7,6 +7,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE InstanceSigs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
@@ -27,7 +28,9 @@ module Data.Anonymous.Opaleye
     , UnPGScalar
     , Table'
     , table
+    , Required
     , required
+    , Optional
     , optional
     , MakeTableProperties
     , properties
@@ -41,7 +44,7 @@ import           Data.Aeson (Value)
 -- anonymous-types -----------------------------------------------------------
 import           Data.Anonymous.Product (Product (Cons, Nil), Record, Tuple)
 import           Data.Field (Field (Field))
-import           Data.Uncurry (Uncurry (Uncurry))
+import           Data.Uncurry (Uncurry (Uncurry), umap)
 
 
 -- anonymous-types-product-profunctors ---------------------------------------
@@ -705,17 +708,74 @@ type family UnPGMapSnd (as :: [(s, *)]) :: [(s, *)] where
 
 
 ------------------------------------------------------------------------------
+class Required a where
+    required' :: KnownSymbol s => Uncurry Field '(s, TableProperties a a)
+
+
+------------------------------------------------------------------------------
+instance Required (Column a) where
+    required' :: forall s a. KnownSymbol s =>
+        Uncurry Field '(s, TableProperties (Column a) (Column a))
+    required' = Uncurry (Field (O.required (symbolVal (Proxy :: Proxy s))))
+
+
+------------------------------------------------------------------------------
+instance Required a => Required (Identity a) where
+    required' = umap (fmap (dimap (\(Identity a) -> a) Identity)) required'
+
+
+------------------------------------------------------------------------------
+instance Required a => Required (Const a b) where
+    required' = umap (fmap (dimap (\(Const a) -> a) Const)) required'
+
+
+------------------------------------------------------------------------------
+instance Required a => Required (Tagged s a) where
+    required' = umap (fmap (dimap (\(Tagged a) -> a) Tagged)) required'
+
+
+------------------------------------------------------------------------------
+class Optional a where
+    optional'
+        :: KnownSymbol s
+        => Uncurry Field '(s, TableProperties (Maybe a) a)
+
+
+------------------------------------------------------------------------------
+instance Optional (Column a) where
+    optional'
+        :: forall s a. KnownSymbol s
+        => Uncurry Field '(s, TableProperties (Maybe (Column a)) (Column a))
+    optional' = Uncurry (Field (O.optional (symbolVal (Proxy :: Proxy s))))
+
+
+------------------------------------------------------------------------------
+instance Optional a => Optional (Identity a) where
+    optional' = umap (fmap (dimap (fmap (\(Identity a) -> a)) pure)) optional'
+
+
+------------------------------------------------------------------------------
+instance Optional a => Optional (Const a b) where
+    optional' = umap (fmap (dimap (fmap (\(Const a) -> a)) Const)) optional'
+
+
+------------------------------------------------------------------------------
+instance Optional a => Optional (Tagged s a) where
+    optional' = umap (fmap (dimap (fmap (\(Tagged a) -> a)) Tagged)) optional'
+
+
+------------------------------------------------------------------------------
 required
-    :: forall s a. KnownSymbol s
-    => Uncurry Field '(s, TableProperties (Column a) (Column a))
-required = Uncurry (Field (O.required (symbolVal (Proxy :: Proxy s))))
+    :: forall s a. (KnownSymbol s, Required a)
+    => Uncurry Field '(s, TableProperties a a)
+required = required' @a @s
 
 
 ------------------------------------------------------------------------------
 optional
-    :: forall s a. KnownSymbol s
-    => Uncurry Field '(s, TableProperties (Maybe (Column a)) (Column a))
-optional = Uncurry (Field (O.optional (symbolVal (Proxy :: Proxy s))))
+    :: forall s a. (KnownSymbol s, Optional a)
+    => Uncurry Field '(s, TableProperties (Maybe a) a)
+optional = optional' @a @s
 
 
 ------------------------------------------------------------------------------
@@ -735,115 +795,23 @@ instance MakeTableProperties '[] '[] '[] where
 
 
 ------------------------------------------------------------------------------
-instance (KnownSymbol s, MakeTableProperties abs as bs) =>
+instance (KnownSymbol s, MakeTableProperties abs as bs, Required a) =>
     MakeTableProperties
-        ('(s, TableProperties (Column a) (Column a)) ': abs)
-        ('(s, Column a) ': as)
-        ('(s, Column a) ': bs)
+        ('(s, TableProperties a a) ': abs)
+        ('(s, a) ': as)
+        ('(s, a) ': bs)
   where
     properties = Cons (required @s @a) properties
 
 
 ------------------------------------------------------------------------------
-instance (KnownSymbol s, MakeTableProperties abs as bs) =>
+instance (KnownSymbol s, MakeTableProperties abs as bs, Optional a) =>
     MakeTableProperties
-        ('(s, TableProperties (Const (Column a) b) (Const (Column a) b))
-            ': abs)
-        ('(s, Const (Column a) b) ': as)
-        ('(s, Const (Column a) b) ': bs)
-  where
-    properties = do
-        let field = O.required (symbolVal (Proxy :: Proxy s))
-        Cons (Uncurry (Field (dimap (\(Const a) -> a) Const field)))
-            properties
-
-
-------------------------------------------------------------------------------
-instance (KnownSymbol s, MakeTableProperties abs as bs) =>
-    MakeTableProperties
-        ('(s, TableProperties (Identity (Column a)) (Identity (Column a)))
-            ': abs)
-        ('(s, Identity (Column a)) ': as)
-        ('(s, Identity (Column a)) ': bs)
-  where
-    properties = do
-        let field = O.required (symbolVal (Proxy :: Proxy s))
-        Cons (Uncurry (Field (dimap (\(Identity a) -> a) Identity field)))
-            properties
-
-
-------------------------------------------------------------------------------
-instance (KnownSymbol s, MakeTableProperties abs as bs) =>
-    MakeTableProperties
-        ('(s, TableProperties (Tagged b (Column a)) (Tagged b (Column a)))
-            ': abs)
-        ('(s, Tagged b (Column a)) ': as)
-        ('(s, Tagged b (Column a)) ': bs)
-  where
-    properties = do
-        let field = O.required (symbolVal (Proxy :: Proxy s))
-        Cons (Uncurry (Field (dimap (\(Tagged a) -> a) Tagged field)))
-            properties
-
-
-------------------------------------------------------------------------------
-instance (KnownSymbol s, MakeTableProperties abs as bs) =>
-    MakeTableProperties
-        ('(s, TableProperties (Maybe (Column a)) (Column a)) ': abs)
-        ('(s, Maybe (Column a)) ': as)
-        ('(s, Column a) ': bs)
+        ('(s, TableProperties (Maybe a) a) ': abs)
+        ('(s, Maybe a) ': as)
+        ('(s, a) ': bs)
   where
     properties = Cons (optional @s @a) properties
-
-
-------------------------------------------------------------------------------
-instance (KnownSymbol s, MakeTableProperties abs as bs) =>
-    MakeTableProperties
-        ('(s, TableProperties
-            (Maybe (Const (Column a) b))
-            (Const (Column a) b))
-                ': abs)
-        ('(s, Maybe (Const (Column a) b)) ': as)
-        ('(s, Const (Column a) b) ': bs)
-  where
-    properties = do
-        let field = O.optional (symbolVal (Proxy :: Proxy s))
-        Cons (Uncurry (Field (dimap (fmap (\(Const a) -> a)) Const field)))
-            properties
-
-
-------------------------------------------------------------------------------
-instance (KnownSymbol s, MakeTableProperties abs as bs) =>
-    MakeTableProperties
-        ('(s, TableProperties
-            (Maybe (Identity (Column a)))
-            (Identity (Column a)))
-                ': abs)
-        ('(s, Maybe (Identity (Column a))) ': as)
-        ('(s, Identity (Column a)) ': bs)
-  where
-    properties = do
-        let field = O.optional (symbolVal (Proxy :: Proxy s))
-        Cons
-            (Uncurry (Field
-                (dimap (fmap (\(Identity a) -> a)) Identity field)))
-            properties
-
-
-------------------------------------------------------------------------------
-instance (KnownSymbol s, MakeTableProperties abs as bs) =>
-    MakeTableProperties
-        ('(s, TableProperties
-            (Maybe (Tagged b (Column a)))
-            (Tagged b (Column a)))
-                ': abs)
-        ('(s, Maybe (Tagged b (Column a))) ': as)
-        ('(s, Tagged b (Column a)) ': bs)
-  where
-    properties = do
-        let field = O.optional (symbolVal (Proxy :: Proxy s))
-        Cons (Uncurry (Field (dimap (fmap (\(Tagged a) -> a)) Tagged field)))
-            properties
 
 
 ------------------------------------------------------------------------------
