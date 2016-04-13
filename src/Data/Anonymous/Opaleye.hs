@@ -59,6 +59,7 @@ import           Data.Anonymous.Profunctor
 -- base ----------------------------------------------------------------------
 import           Control.Applicative (Const (Const))
 import           Control.Arrow (returnA)
+import           Control.Monad.IO.Class (liftIO)
 import           Data.Functor.Identity (Identity (Identity))
 import           Data.Int (Int16, Int32, Int64)
 import           Data.Monoid ((<>))
@@ -120,6 +121,10 @@ import           Data.Profunctor.Product.Default (Default)
 
 -- tagged --------------------------------------------------------------------
 import           Data.Tagged (Tagged (Tagged))
+
+
+-- transformers --------------------------------------------------------------
+import           Control.Monad.Trans.Reader (ReaderT, ask)
 
 
 -- text ----------------------------------------------------------------------
@@ -490,8 +495,10 @@ type family UnPGMapSnd (as :: [(s, *)]) :: [(s, *)] where
 
 
 ------------------------------------------------------------------------------
-run :: (PGRep a p, Default QueryRunner p a) => Connection -> Query p -> IO [a]
-run = runQuery
+run :: (PGRep a p, Default QueryRunner p a)
+    => Query p
+    -> ReaderT Connection IO [a]
+run query = ask >>= \connection -> liftIO (runQuery connection query)
 
 
 ------------------------------------------------------------------------------
