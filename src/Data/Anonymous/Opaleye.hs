@@ -18,11 +18,10 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 module Data.Anonymous.Opaleye
-    ( PGRun
+    ( PGRep
     , PG
     , UnPG
     , run
-    , PGLift
     , pg
     , PGScalar
     , UnPGScalar
@@ -34,6 +33,9 @@ module Data.Anonymous.Opaleye
     , optional
     , MakeTableProperties
     , properties
+    , Orderable
+    , ordering
+    , ordered
     )
 where
 
@@ -56,10 +58,11 @@ import           Data.Anonymous.Profunctor
 
 -- base ----------------------------------------------------------------------
 import           Control.Applicative (Const (Const))
+import           Control.Arrow (returnA)
 import           Data.Functor.Identity (Identity (Identity))
 import           Data.Int (Int16, Int32, Int64)
+import           Data.Monoid ((<>))
 import           Data.Proxy (Proxy (Proxy))
-import           Data.Typeable (Typeable)
 import           GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 
@@ -71,8 +74,14 @@ import           Data.ByteString (ByteString)
 import           Data.CaseInsensitive (CI)
 
 
+-- contravariant -------------------------------------------------------------
+import           Data.Functor.Contravariant (contramap)
+
+
 -- opaleye -------------------------------------------------------------------
-import           Opaleye.Column (Column, Nullable, maybeToNullable)
+import           Opaleye.Column (Column, Nullable)
+import           Opaleye.Constant (Constant, constant)
+import           Opaleye.Order (Order, PGOrd, asc, orderBy)
 import           Opaleye.PGTypes
                      ( PGArray
                      , PGBool
@@ -90,25 +99,9 @@ import           Opaleye.PGTypes
                      , PGTimestamp
                      , PGTimestamptz
                      , PGUuid
-                     , pgBool
-                     , pgCiStrictText
-                     , pgDay
-                     , pgDouble
-                     , pgInt4
-                     , pgInt8
-                     , pgLocalTime
-                     , pgStrictByteString
-                     , pgStrictText
-                     , pgTimeOfDay
-                     , pgUTCTime
-                     , pgValueJSONB
                      )
 import           Opaleye.QueryArr (Query)
-import           Opaleye.RunQuery
-                     ( QueryRunner
-                     , QueryRunnerColumnDefault
-                     , runQuery
-                     )
+import           Opaleye.RunQuery (QueryRunner, runQuery)
 import           Opaleye.Table (Table (Table), TableProperties)
 import qualified Opaleye.Table as O (optional, required)
 
@@ -144,118 +137,65 @@ import           Data.UUID (UUID)
 
 
 ------------------------------------------------------------------------------
-class (PG a ~ p, UnPG p ~ a, Default QueryRunner p a) =>
-    PGRun a p | p -> a, a -> p
-  where
+class (PG a ~ p, UnPG p ~ a) => PGRep a p | p -> a, a -> p where
     type PG a :: *
     type UnPG p :: *
-    run :: Connection -> Query p -> IO [a]
-    run = runQuery
 
 
 ------------------------------------------------------------------------------
-class PGRun a p => PGLift a p | p -> a, a -> p where
-    pg :: a -> p
-
-
-------------------------------------------------------------------------------
-instance PGRun a p => PGRun (Const a b) (Const p b) where
+instance PGRep a p => PGRep (Const a b) (Const p b) where
     type PG (Const a b) = Const (PG a) b
     type UnPG (Const p b) = Const (UnPG p) b
 
 
 ------------------------------------------------------------------------------
-instance PGLift a p => PGLift (Const a b) (Const p b) where
-    pg (Const a) = Const (pg a)
-
-
-------------------------------------------------------------------------------
-instance PGRun a p => PGRun (Identity a) (Identity p) where
+instance PGRep a p => PGRep (Identity a) (Identity p) where
     type PG (Identity a) = Identity (PG a)
     type UnPG (Identity a) = Identity (UnPG a)
 
 
 ------------------------------------------------------------------------------
-instance PGLift a p => PGLift (Identity a) (Identity p) where
-    pg (Identity a) = Identity (pg a)
-
-
-------------------------------------------------------------------------------
-instance PGRun a p => PGRun (Tagged s a) (Tagged s p) where
+instance PGRep a p => PGRep (Tagged s a) (Tagged s p) where
     type PG (Tagged s a) = Tagged s (PG a)
     type UnPG (Tagged s p) = Tagged s (UnPG p)
 
 
 ------------------------------------------------------------------------------
-instance PGLift a p => PGLift (Tagged s a) (Tagged s p) where
-    pg (Tagged a) = Tagged (pg a)
-
-
-------------------------------------------------------------------------------
-instance (KnownSymbol s, PGRun a p) => PGRun (Field s a) (Field s p) where
+instance PGRep a p => PGRep (Field s a) (Field s p) where
     type PG (Field s a) = Field s (PG a)
     type UnPG (Field s p) = Field s (UnPG p)
 
 
 ------------------------------------------------------------------------------
-instance (KnownSymbol s, PGLift a p) => PGLift (Field s a) (Field s p) where
-    pg (Field a) = Field (pg a)
-
-
-------------------------------------------------------------------------------
-instance PGRun () () where
+instance PGRep () () where
     type PG () = ()
     type UnPG () = ()
 
 
 ------------------------------------------------------------------------------
-instance PGLift () () where
-    pg () = ()
-
-
-------------------------------------------------------------------------------
-instance (PGRun a pa, PGRun b pb) => PGRun (a, b) (pa, pb) where
+instance (PGRep a pa, PGRep b pb) => PGRep (a, b) (pa, pb) where
     type PG (a, b) = (PG a, PG b)
     type UnPG (pa, pb) = (UnPG pa, UnPG pb)
 
 
 ------------------------------------------------------------------------------
-instance (PGLift a pa, PGLift b pb) => PGLift (a, b) (pa, pb) where
-    pg (a, b) = (pg a, pg b)
-
-
-------------------------------------------------------------------------------
-instance (PGRun a pa, PGRun b pb, PGRun c pc) => PGRun (a, b, c) (pa, pb, pc)
+instance (PGRep a pa, PGRep b pb, PGRep c pc) => PGRep (a, b, c) (pa, pb, pc)
   where
     type PG (a, b, c) = (PG a, PG b, PG c)
     type UnPG (pa, pb, pc) = (UnPG pa, UnPG pb, UnPG pc)
 
 
 ------------------------------------------------------------------------------
-instance (PGLift a pa, PGLift b pb, PGLift c pc) =>
-    PGLift (a, b, c) (pa, pb, pc)
-  where
-    pg (a, b, c) = (pg a, pg b, pg c)
-
-
-------------------------------------------------------------------------------
-instance (PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd) =>
-    PGRun (a, b, c, d) (pa, pb, pc, pd)
+instance (PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd) =>
+    PGRep (a, b, c, d) (pa, pb, pc, pd)
   where
     type PG (a, b, c, d) = (PG a, PG b, PG c, PG d)
     type UnPG (pa, pb, pc, pd) = (UnPG pa, UnPG pb, UnPG pc, UnPG pd)
 
 
 ------------------------------------------------------------------------------
-instance (PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd) =>
-    PGLift (a, b, c, d) (pa, pb, pc, pd)
-  where
-    pg (a, b, c, d) = (pg a, pg b, pg c, pg d)
-
-
-------------------------------------------------------------------------------
-instance (PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe) =>
-    PGRun (a, b, c, d, e) (pa, pb, pc, pd, pe)
+instance (PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe) =>
+    PGRep (a, b, c, d, e) (pa, pb, pc, pd, pe)
   where
     type PG (a, b, c, d, e) = (PG a, PG b, PG c, PG d, PG e)
     type UnPG (pa, pb, pc, pd, pe) =
@@ -263,17 +203,10 @@ instance (PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe) =>
 
 
 ------------------------------------------------------------------------------
-instance (PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe) =>
-    PGLift (a, b, c, d, e) (pa, pb, pc, pd, pe)
-  where
-    pg (a, b, c, d, e) = (pg a, pg b, pg c, pg d, pg e)
-
-
-------------------------------------------------------------------------------
 instance
-    (PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe, PGRun f pf)
+    (PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe, PGRep f pf)
   =>
-    PGRun (a, b, c, d, e, f) (pa, pb, pc, pd, pe, pf)
+    PGRep (a, b, c, d, e, f) (pa, pb, pc, pd, pe, pf)
   where
     type PG (a, b, c, d, e, f) = (PG a, PG b, PG c, PG d, PG e, PG f)
     type UnPG (pa, pb, pc, pd, pe, pf) =
@@ -282,22 +215,11 @@ instance
 
 ------------------------------------------------------------------------------
 instance
-    ( PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe
-    , PGLift f pf
+    ( PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe, PGRep f pf
+    , PGRep g pg
     )
   =>
-    PGLift (a, b, c, d, e, f) (pa, pb, pc, pd, pe, pf)
-  where
-    pg (a, b, c, d, e, f) = (pg a, pg b, pg c, pg d, pg e, pg f)
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe, PGRun f pf
-    , PGRun g pg
-    )
-  =>
-    PGRun (a, b, c, d, e, f, g) (pa, pb, pc, pd, pe, pf, pg)
+    PGRep (a, b, c, d, e, f, g) (pa, pb, pc, pd, pe, pf, pg)
   where
     type PG (a, b, c, d, e, f, g) = (PG a, PG b, PG c, PG d, PG e, PG f, PG g)
     type UnPG (pa, pb, pc, pd, pe, pf, pg) =
@@ -306,22 +228,11 @@ instance
 
 ------------------------------------------------------------------------------
 instance
-    ( PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe
-    , PGLift f pf, PGLift g pg
+    ( PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe, PGRep f pf
+    , PGRep g pg, PGRep h ph
     )
   =>
-    PGLift (a, b, c, d, e, f, g) (pa, pb, pc, pd, pe, pf, pg)
-  where
-    pg (a, b, c, d, e, f, g) = (pg a, pg b, pg c, pg d, pg e, pg f, pg g)
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe, PGRun f pf
-    , PGRun g pg, PGRun h ph
-    )
-  =>
-    PGRun (a, b, c, d, e, f, g, h) (pa, pb, pc, pd, pe, pf, pg, ph)
+    PGRep (a, b, c, d, e, f, g, h) (pa, pb, pc, pd, pe, pf, pg, ph)
   where
     type PG (a, b, c, d, e, f, g, h) =
         (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h)
@@ -333,23 +244,11 @@ instance
 
 ------------------------------------------------------------------------------
 instance
-    ( PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe
-    , PGLift f pf, PGLift g pg, PGLift h ph
+    ( PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe, PGRep f pf
+    , PGRep g pg, PGRep h ph, PGRep i pi
     )
   =>
-    PGLift (a, b, c, d, e, f, g, h) (pa, pb, pc, pd, pe, pf, pg, ph)
-  where
-    pg (a, b, c, d, e, f, g, h) =
-        (pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h)
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe, PGRun f pf
-    , PGRun g pg, PGRun h ph, PGRun i pi
-    )
-  =>
-    PGRun (a, b, c, d, e, f, g, h, i) (pa, pb, pc, pd, pe, pf, pg, ph, pi)
+    PGRep (a, b, c, d, e, f, g, h, i) (pa, pb, pc, pd, pe, pf, pg, ph, pi)
   where
     type PG (a, b, c, d, e, f, g, h, i) =
         (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i)
@@ -361,23 +260,11 @@ instance
 
 ------------------------------------------------------------------------------
 instance
-    ( PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe
-    , PGLift f pf, PGLift g pg, PGLift h ph, PGLift i pi
+    ( PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe, PGRep f pf
+    , PGRep g pg, PGRep h ph, PGRep i pi, PGRep j pj
     )
   =>
-    PGLift (a, b, c, d, e, f, g, h, i) (pa, pb, pc, pd, pe, pf, pg, ph, pi)
-  where
-    pg (a, b, c, d, e, f, g, h, i) =
-        (pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i)
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRun a pa, PGRun b pb, PGRun c pc, PGRun d pd, PGRun e pe, PGRun f pf
-    , PGRun g pg, PGRun h ph, PGRun i pi, PGRun j pj
-    )
-  =>
-    PGRun
+    PGRep
         (a, b, c, d, e, f, g, h, i, j)
         (pa, pb, pc, pd, pe, pf, pg, ph, pi, pj)
   where
@@ -390,39 +277,20 @@ instance
 
 
 ------------------------------------------------------------------------------
-instance
-    ( PGLift a pa, PGLift b pb, PGLift c pc, PGLift d pd, PGLift e pe
-    , PGLift f pf, PGLift g pg, PGLift h ph, PGLift i pi, PGLift j pj
-    )
-  =>
-    PGLift
-        (a, b, c, d, e, f, g, h, i, j)
-        (pa, pb, pc, pd, pe, pf, pg, ph, pi, pj)
-  where
-    pg (a, b, c, d, e, f, g, h, i, j) =
-        (pg a, pg b, pg c, pg d, pg e, pg f, pg g, pg h, pg i, pg j)
-
-
-------------------------------------------------------------------------------
-instance PGRun (Product g '[]) (Product g '[]) where
+instance PGRep (Product g '[]) (Product g '[]) where
     type PG (Product g '[]) = Product g '[]
     type UnPG (Product g '[]) = Product g '[]
 
 
 ------------------------------------------------------------------------------
-instance PGLift (Product g '[]) (Product g '[]) where
-    pg Nil = Nil
-
-
-------------------------------------------------------------------------------
 instance
-    ( PGRun a p
-    , PGRun (Tuple as) (Tuple ps)
+    ( PGRep a p
+    , PGRep (Tuple as) (Tuple ps)
     , PG (Tuple as) ~ Tuple (PGMap as)
     , UnPG (Tuple ps) ~ Tuple (UnPGMap ps)
     )
   =>
-    PGRun (Tuple (a ': as)) (Tuple (p ': ps))
+    PGRep (Tuple (a ': as)) (Tuple (p ': ps))
   where
     type PG (Tuple (a ': as)) = Tuple (PG a ': PGMap as)
     type UnPG (Tuple (p ': ps)) = Tuple (UnPG p ': UnPGMap ps)
@@ -430,27 +298,13 @@ instance
 
 ------------------------------------------------------------------------------
 instance
-    ( PGLift a p
-    , PGLift (Tuple as) (Tuple ps)
-    , PG (Tuple as) ~ Tuple (PGMap as)
-    , UnPG (Tuple ps) ~ Tuple (UnPGMap ps)
-    )
-  =>
-    PGLift (Tuple (a ': as)) (Tuple (p ': ps))
-  where
-    pg (Cons (Identity a) as) = Cons (Identity (pg a)) (pg as)
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRun a p
-    , PGRun (Record as) (Record ps)
+    ( PGRep a p
+    , PGRep (Record as) (Record ps)
     , PG (Record as) ~ Record (PGMapSnd as)
     , UnPG (Record ps) ~ Record (UnPGMapSnd ps)
-    , KnownSymbol s
     )
   =>
-    PGRun (Record ('(s, a) ': as)) (Record ('(s, p) ': ps))
+    PGRep (Record ('(s, a) ': as)) (Record ('(s, p) ': ps))
   where
     type PG (Record ('(s, a) ': as)) = Record ('(s, PG a) ': PGMapSnd as)
     type UnPG (Record ('(s, p) ': ps)) =
@@ -459,27 +313,12 @@ instance
 
 ------------------------------------------------------------------------------
 instance
-    ( PGLift a p
-    , PGLift (Record as) (Record ps)
-    , PG (Record as) ~ Record (PGMapSnd as)
-    , UnPG (Record ps) ~ Record (UnPGMapSnd ps)
-    , KnownSymbol s
-    )
-  =>
-    PGLift (Record ('(s, a) ': as)) (Record ('(s, p) ': ps))
-  where
-    pg (Cons (Uncurry (Field a)) as) = Cons (Uncurry (Field (pg a))) (pg as)
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRun a (Column p)
+    ( PGRep a (Column p)
     , p ~ PGScalar a
     , a ~ UnPGScalar p
-    , QueryRunnerColumnDefault p a
     )
   =>
-    PGRun (Maybe a) (Column (Nullable p))
+    PGRep (Maybe a) (Column (Nullable p))
   where
     type PG (Maybe a) = Column (Nullable (PGScalar a))
     type UnPG (Column (Nullable p)) = Maybe (UnPGScalar p)
@@ -487,162 +326,105 @@ instance
 
 ------------------------------------------------------------------------------
 instance
-    ( PGLift a (Column p)
+    ( PGRep a (Column p)
     , p ~ PGScalar a
     , a ~ UnPGScalar p
-    , QueryRunnerColumnDefault p a
     )
   =>
-    PGLift (Maybe a) (Column (Nullable p))
-  where
-    pg = maybeToNullable . fmap pg
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRun a (Column p)
-    , p ~ PGScalar a
-    , a ~ UnPGScalar p
-    , QueryRunnerColumnDefault p a
-    , Typeable a
-    )
-  =>
-    PGRun [a] (Column (PGArray p))
+    PGRep [a] (Column (PGArray p))
   where
     type PG [a] = Column (PGArray (PGScalar a))
     type UnPG (Column (PGArray p)) = [UnPGScalar p]
 
 
 ------------------------------------------------------------------------------
-instance PGRun Bool (Column PGBool) where
+instance PGRep Bool (Column PGBool) where
     type PG Bool = Column PGBool
     type UnPG (Column PGBool) = Bool
 
 
 ------------------------------------------------------------------------------
-instance PGLift Bool (Column PGBool) where
-    pg = pgBool
-
-
-------------------------------------------------------------------------------
-instance PGRun ByteString (Column PGBytea) where
+instance PGRep ByteString (Column PGBytea) where
     type PG ByteString = Column PGBytea
     type UnPG (Column PGBytea) = ByteString
 
 
 ------------------------------------------------------------------------------
-instance PGLift ByteString (Column PGBytea) where
-    pg = pgStrictByteString
-
-
-------------------------------------------------------------------------------
-instance PGRun (CI Text) (Column PGCitext) where
+instance PGRep (CI Text) (Column PGCitext) where
     type PG (CI Text) = Column PGCitext
     type UnPG (Column PGCitext) = CI Text
 
 
 ------------------------------------------------------------------------------
-instance PGLift (CI Text) (Column PGCitext) where
-    pg = pgCiStrictText
-
-
-------------------------------------------------------------------------------
-instance PGRun Day (Column PGDate) where
+instance PGRep Day (Column PGDate) where
     type PG Day = Column PGDate
     type UnPG (Column PGDate) = Day
 
 
 ------------------------------------------------------------------------------
-instance PGLift Day (Column PGDate) where
-    pg = pgDay
-
-
-------------------------------------------------------------------------------
-instance PGRun Double (Column PGFloat8) where
+instance PGRep Double (Column PGFloat8) where
     type PG Double = Column PGFloat8
     type UnPG (Column PGFloat8) = Double
 
 
 ------------------------------------------------------------------------------
-instance PGLift Double (Column PGFloat8) where
-    pg = pgDouble
+instance PGRep Float (Column PGFloat4) where
+    type PG Float = Column PGFloat4
+    type UnPG (Column PGFloat4) = Float
 
 
 ------------------------------------------------------------------------------
-instance PGRun Int32 (Column PGInt4) where
+instance PGRep Int16 (Column PGInt2) where
+    type PG Int16 = Column PGInt2
+    type UnPG (Column PGInt2) = Int16
+
+
+------------------------------------------------------------------------------
+instance PGRep Int32 (Column PGInt4) where
     type PG Int32 = Column PGInt4
     type UnPG (Column PGInt4) = Int32
 
 
 ------------------------------------------------------------------------------
-instance PGLift Int32 (Column PGInt4) where
-    pg = pgInt4 . fromIntegral
-
-
-------------------------------------------------------------------------------
-instance PGRun Int64 (Column PGInt8) where
+instance PGRep Int64 (Column PGInt8) where
     type PG Int64 = Column PGInt8
     type UnPG (Column PGInt8) = Int64
 
 
 ------------------------------------------------------------------------------
-instance PGLift Int64 (Column PGInt8) where
-    pg = pgInt8
-
-
-------------------------------------------------------------------------------
-instance PGRun LocalTime (Column PGTimestamp) where
+instance PGRep LocalTime (Column PGTimestamp) where
     type PG LocalTime = Column PGTimestamp
     type UnPG (Column PGTimestamp) = LocalTime
 
 
 ------------------------------------------------------------------------------
-instance PGLift LocalTime (Column PGTimestamp) where
-    pg = pgLocalTime
-
-
-------------------------------------------------------------------------------
-instance PGRun Text (Column PGText) where
+instance PGRep Text (Column PGText) where
     type PG Text = Column PGText
     type UnPG (Column PGText) = Text
 
 
 ------------------------------------------------------------------------------
-instance PGLift Text (Column PGText) where
-    pg = pgStrictText
-
-
-------------------------------------------------------------------------------
-instance PGRun TimeOfDay (Column PGTime) where
+instance PGRep TimeOfDay (Column PGTime) where
     type PG TimeOfDay = Column PGTime
     type UnPG (Column PGTime) = TimeOfDay
 
 
 ------------------------------------------------------------------------------
-instance PGLift TimeOfDay (Column PGTime) where
-    pg = pgTimeOfDay
+instance PGRep UUID (Column PGUuid) where
+    type PG UUID = Column PGUuid
+    type UnPG (Column PGUuid) = UUID
 
 
 ------------------------------------------------------------------------------
-instance PGRun UTCTime (Column PGTimestamptz) where
+instance PGRep UTCTime (Column PGTimestamptz) where
     type PG UTCTime = Column PGTimestamptz
     type UnPG (Column PGTimestamptz) = UTCTime
 
 
 ------------------------------------------------------------------------------
-instance PGLift UTCTime (Column PGTimestamptz) where
-    pg = pgUTCTime
-
-
-------------------------------------------------------------------------------
-instance PGRun Value (Column PGJsonb) where
+instance PGRep Value (Column PGJsonb) where
     type PG Value = Column PGJsonb
     type UnPG (Column PGJsonb) = Value
-
-
-------------------------------------------------------------------------------
-instance PGLift Value (Column PGJsonb) where
-    pg = pgValueJSONB
 
 
 ------------------------------------------------------------------------------
@@ -708,73 +490,86 @@ type family UnPGMapSnd (as :: [(s, *)]) :: [(s, *)] where
 
 
 ------------------------------------------------------------------------------
+run :: (PGRep a p, Default QueryRunner p a) => Connection -> Query p -> IO [a]
+run = runQuery
+
+
+------------------------------------------------------------------------------
+pg :: (PGRep a p, Default Constant a p) => a -> p
+pg = constant
+
+
+------------------------------------------------------------------------------
 class Required a where
-    required' :: KnownSymbol s => Uncurry Field '(s, TableProperties a a)
+    required'
+        :: KnownSymbol s
+        => String
+        -> Uncurry Field '(s, TableProperties a a)
 
 
 ------------------------------------------------------------------------------
 instance Required (Column a) where
-    required' :: forall s a. KnownSymbol s =>
-        Uncurry Field '(s, TableProperties (Column a) (Column a))
-    required' = Uncurry (Field (O.required (symbolVal (Proxy :: Proxy s))))
+    required' = Uncurry . Field . O.required
 
 
 ------------------------------------------------------------------------------
 instance Required a => Required (Identity a) where
-    required' = umap (fmap (dimap (\(Identity a) -> a) Identity)) required'
+    required' = umap (fmap (dimap (\(Identity a) -> a) Identity)) . required'
 
 
 ------------------------------------------------------------------------------
 instance Required a => Required (Const a b) where
-    required' = umap (fmap (dimap (\(Const a) -> a) Const)) required'
+    required' = umap (fmap (dimap (\(Const a) -> a) Const)) . required'
 
 
 ------------------------------------------------------------------------------
 instance Required a => Required (Tagged s a) where
-    required' = umap (fmap (dimap (\(Tagged a) -> a) Tagged)) required'
+    required' = umap (fmap (dimap (\(Tagged a) -> a) Tagged)) . required'
 
 
 ------------------------------------------------------------------------------
 class Optional a where
     optional'
         :: KnownSymbol s
-        => Uncurry Field '(s, TableProperties (Maybe a) a)
+        => String
+        -> Uncurry Field '(s, TableProperties (Maybe a) a)
 
 
 ------------------------------------------------------------------------------
 instance Optional (Column a) where
-    optional'
-        :: forall s a. KnownSymbol s
-        => Uncurry Field '(s, TableProperties (Maybe (Column a)) (Column a))
-    optional' = Uncurry (Field (O.optional (symbolVal (Proxy :: Proxy s))))
+    optional' = Uncurry . Field . O.optional
 
 
 ------------------------------------------------------------------------------
 instance Optional a => Optional (Identity a) where
-    optional' = umap (fmap (dimap (fmap (\(Identity a) -> a)) pure)) optional'
+    optional' = umap (fmap (dimap (fmap (\(Identity a) -> a)) Identity))
+        . optional'
 
 
 ------------------------------------------------------------------------------
 instance Optional a => Optional (Const a b) where
-    optional' = umap (fmap (dimap (fmap (\(Const a) -> a)) Const)) optional'
+    optional' = umap (fmap (dimap (fmap (\(Const a) -> a)) Const)) . optional'
 
 
 ------------------------------------------------------------------------------
 instance Optional a => Optional (Tagged s a) where
-    optional' = umap (fmap (dimap (fmap (\(Tagged a) -> a)) Tagged)) optional'
+    optional' = umap (fmap (dimap (fmap (\(Tagged a) -> a)) Tagged))
+        . optional'
 
 
 ------------------------------------------------------------------------------
 required
     :: forall s a. (KnownSymbol s, Required a)
-    => Uncurry Field '(s, TableProperties a a)
+    => String
+    -> Uncurry Field '(s, TableProperties a a)
 required = required' @a @s
 
 
 ------------------------------------------------------------------------------
 optional
     :: forall s a. (KnownSymbol s, Optional a)
-    => Uncurry Field '(s, TableProperties (Maybe a) a)
+    => String
+    -> Uncurry Field '(s, TableProperties (Maybe a) a)
 optional = optional' @a @s
 
 
@@ -801,7 +596,7 @@ instance (KnownSymbol s, MakeTableProperties abs as bs, Required a) =>
         ('(s, a) ': as)
         ('(s, a) ': bs)
   where
-    properties = Cons (required @s @a) properties
+    properties = Cons (required @s @a (symbolVal @s Proxy)) properties
 
 
 ------------------------------------------------------------------------------
@@ -811,7 +606,7 @@ instance (KnownSymbol s, MakeTableProperties abs as bs, Optional a) =>
         ('(s, Maybe a) ': as)
         ('(s, a) ': bs)
   where
-    properties = Cons (optional @s @a) properties
+    properties = Cons (optional @s @a (symbolVal @s Proxy)) properties
 
 
 ------------------------------------------------------------------------------
@@ -827,3 +622,296 @@ table
     => String
     -> Table (Record as) (Record bs)
 table s = Table s $ pRecord properties
+
+
+------------------------------------------------------------------------------
+class Orderable a where
+    ordering :: Order a
+
+
+------------------------------------------------------------------------------
+instance PGOrd a => Orderable (Column a) where
+    ordering = asc id
+
+
+------------------------------------------------------------------------------
+instance Orderable a => Orderable (Identity a) where
+    ordering = contramap (\(Identity a) -> a) ordering
+
+
+------------------------------------------------------------------------------
+instance Orderable a => Orderable (Const a b) where
+    ordering = contramap (\(Const a) -> a) ordering
+
+
+------------------------------------------------------------------------------
+instance Orderable a => Orderable (Tagged s a) where
+    ordering = contramap (\(Tagged a) -> a) ordering
+
+
+------------------------------------------------------------------------------
+instance Orderable a => Orderable (Field s a) where
+    ordering = contramap (\(Field a) -> a) ordering
+
+
+------------------------------------------------------------------------------
+instance Orderable (f a b) => Orderable (Uncurry f '(a, b)) where
+    ordering = contramap (\(Uncurry f) -> f) (ordering @(f a b))
+
+
+------------------------------------------------------------------------------
+instance Orderable () where
+    ordering = mempty
+
+
+------------------------------------------------------------------------------
+instance (Orderable a, Orderable b) => Orderable (a, b) where
+    ordering = mconcat
+        [ contramap fst ordering
+        , contramap snd ordering
+        ]
+
+
+------------------------------------------------------------------------------
+instance (Orderable a, Orderable b, Orderable c) => Orderable (a, b, c) where
+    ordering = mconcat
+        [ contramap fst3 ordering
+        , contramap snd3 ordering
+        , contramap trd3 ordering
+        ]
+      where
+        fst3 (a, _, _) = a
+        snd3 (_, b, _) = b
+        trd3 (_, _, c) = c
+
+
+------------------------------------------------------------------------------
+instance (Orderable a, Orderable b, Orderable c, Orderable d) =>
+    Orderable (a, b, c, d)
+  where
+    ordering = mconcat
+        [ contramap fst4 ordering
+        , contramap snd4 ordering
+        , contramap trd4 ordering
+        , contramap frt4 ordering
+        ]
+      where
+        fst4 (a, _, _, _) = a
+        snd4 (_, b, _, _) = b
+        trd4 (_, _, c, _) = c
+        frt4 (_, _, _, d) = d
+
+
+------------------------------------------------------------------------------
+instance (Orderable a, Orderable b, Orderable c, Orderable d, Orderable e) =>
+    Orderable (a, b, c, d, e)
+  where
+    ordering = mconcat
+        [ contramap fst5 ordering
+        , contramap snd5 ordering
+        , contramap trd5 ordering
+        , contramap frt5 ordering
+        , contramap fft5 ordering
+        ]
+      where
+        fst5 (a, _, _, _, _) = a
+        snd5 (_, b, _, _, _) = b
+        trd5 (_, _, c, _, _) = c
+        frt5 (_, _, _, d, _) = d
+        fft5 (_, _, _, _, e) = e
+
+
+------------------------------------------------------------------------------
+instance
+    ( Orderable a
+    , Orderable b
+    , Orderable c
+    , Orderable d
+    , Orderable e
+    , Orderable f
+    )
+  =>
+    Orderable (a, b, c, d, e, f)
+  where
+    ordering = mconcat
+        [ contramap fst6 ordering
+        , contramap snd6 ordering
+        , contramap trd6 ordering
+        , contramap frt6 ordering
+        , contramap fft6 ordering
+        , contramap sxt6 ordering
+        ]
+      where
+        fst6 (a, _, _, _, _, _) = a
+        snd6 (_, b, _, _, _, _) = b
+        trd6 (_, _, c, _, _, _) = c
+        frt6 (_, _, _, d, _, _) = d
+        fft6 (_, _, _, _, e, _) = e
+        sxt6 (_, _, _, _, _, f) = f
+
+
+------------------------------------------------------------------------------
+instance
+    ( Orderable a
+    , Orderable b
+    , Orderable c
+    , Orderable d
+    , Orderable e
+    , Orderable f
+    , Orderable g
+    )
+  =>
+    Orderable (a, b, c, d, e, f, g)
+  where
+    ordering = mconcat
+        [ contramap fst7 ordering
+        , contramap snd7 ordering
+        , contramap trd7 ordering
+        , contramap frt7 ordering
+        , contramap fft7 ordering
+        , contramap sxt7 ordering
+        , contramap svn7 ordering
+        ]
+      where
+        fst7 (a, _, _, _, _, _, _) = a
+        snd7 (_, b, _, _, _, _, _) = b
+        trd7 (_, _, c, _, _, _, _) = c
+        frt7 (_, _, _, d, _, _, _) = d
+        fft7 (_, _, _, _, e, _, _) = e
+        sxt7 (_, _, _, _, _, f, _) = f
+        svn7 (_, _, _, _, _, _, g) = g
+
+
+------------------------------------------------------------------------------
+instance
+    ( Orderable a
+    , Orderable b
+    , Orderable c
+    , Orderable d
+    , Orderable e
+    , Orderable f
+    , Orderable g
+    , Orderable h
+    )
+  =>
+    Orderable (a, b, c, d, e, f, g, h)
+  where
+    ordering = mconcat
+        [ contramap fst8 ordering
+        , contramap snd8 ordering
+        , contramap trd8 ordering
+        , contramap frt8 ordering
+        , contramap fft8 ordering
+        , contramap sxt8 ordering
+        , contramap svn8 ordering
+        , contramap egt8 ordering
+        ]
+      where
+        fst8 (a, _, _, _, _, _, _, _) = a
+        snd8 (_, b, _, _, _, _, _, _) = b
+        trd8 (_, _, c, _, _, _, _, _) = c
+        frt8 (_, _, _, d, _, _, _, _) = d
+        fft8 (_, _, _, _, e, _, _, _) = e
+        sxt8 (_, _, _, _, _, f, _, _) = f
+        svn8 (_, _, _, _, _, _, g, _) = g
+        egt8 (_, _, _, _, _, _, _, h) = h
+
+
+------------------------------------------------------------------------------
+instance
+    ( Orderable a
+    , Orderable b
+    , Orderable c
+    , Orderable d
+    , Orderable e
+    , Orderable f
+    , Orderable g
+    , Orderable h
+    , Orderable i
+    )
+  =>
+    Orderable (a, b, c, d, e, f, g, h, i)
+  where
+    ordering = mconcat
+        [ contramap fst9 ordering
+        , contramap snd9 ordering
+        , contramap trd9 ordering
+        , contramap frt9 ordering
+        , contramap fft9 ordering
+        , contramap sxt9 ordering
+        , contramap svn9 ordering
+        , contramap egt9 ordering
+        , contramap nnt9 ordering
+        ]
+      where
+        fst9 (a, _, _, _, _, _, _, _, _) = a
+        snd9 (_, b, _, _, _, _, _, _, _) = b
+        trd9 (_, _, c, _, _, _, _, _, _) = c
+        frt9 (_, _, _, d, _, _, _, _, _) = d
+        fft9 (_, _, _, _, e, _, _, _, _) = e
+        sxt9 (_, _, _, _, _, f, _, _, _) = f
+        svn9 (_, _, _, _, _, _, g, _, _) = g
+        egt9 (_, _, _, _, _, _, _, h, _) = h
+        nnt9 (_, _, _, _, _, _, _, _, i) = i
+
+
+------------------------------------------------------------------------------
+instance
+    ( Orderable a
+    , Orderable b
+    , Orderable c
+    , Orderable d
+    , Orderable e
+    , Orderable f
+    , Orderable g
+    , Orderable h
+    , Orderable i
+    , Orderable j
+    )
+  =>
+    Orderable (a, b, c, d, e, f, g, h, i, j)
+  where
+    ordering = mconcat
+        [ contramap fst10 ordering
+        , contramap snd10 ordering
+        , contramap trd10 ordering
+        , contramap frt10 ordering
+        , contramap fft10 ordering
+        , contramap sxt10 ordering
+        , contramap svn10 ordering
+        , contramap egt10 ordering
+        , contramap nnt10 ordering
+        , contramap tnt10 ordering
+        ]
+      where
+        fst10 (a, _, _, _, _, _, _, _, _, _) = a
+        snd10 (_, b, _, _, _, _, _, _, _, _) = b
+        trd10 (_, _, c, _, _, _, _, _, _, _) = c
+        frt10 (_, _, _, d, _, _, _, _, _, _) = d
+        fft10 (_, _, _, _, e, _, _, _, _, _) = e
+        sxt10 (_, _, _, _, _, f, _, _, _, _) = f
+        svn10 (_, _, _, _, _, _, g, _, _, _) = g
+        egt10 (_, _, _, _, _, _, _, h, _, _) = h
+        nnt10 (_, _, _, _, _, _, _, _, i, _) = i
+        tnt10 (_, _, _, _, _, _, _, _, _, j) = j
+
+
+------------------------------------------------------------------------------
+instance Orderable (Product g '[]) where
+    ordering = mempty
+
+
+------------------------------------------------------------------------------
+instance (Orderable (g a), Orderable (Product g as)) =>
+    Orderable (Product g (a ': as))
+  where
+    ordering = contramap (\(Cons a _) -> a) (ordering @(g a)) <>
+        contramap (\(Cons _ as) -> as) (ordering @(Product g as))
+
+
+
+------------------------------------------------------------------------------
+ordered :: Orderable a => Query (a, b) -> Query b
+ordered query = proc () -> do
+    (_, result) <- orderBy (contramap fst ordering) query -< ()
+    returnA -< result
