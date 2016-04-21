@@ -1,6 +1,6 @@
-name:           anonymous-types-opaleye
+name:           opaleye-of-the-stream-beneath-the-hills
 version:        0.1
-synopsis:       Boilerplate for using anonymous-types with Opaleye
+synopsis:       Boilerplate for Opaleye, making use of anonymous-types' records
 license:        MPL-2.0
 license-file:   LICENSE
 author:         Shane O'Brien
@@ -9,8 +9,8 @@ stability:      Experimental
 category:       Type
 cabal-version:  >= 1.6
 build-type:     Simple
-homepage:       https://github.com/duairc/anonymous-types
-bug-reports:    https://github.com/duairc/anonymous-types/issues
+homepage:       https://github.com/duairc/opaleye-of-the-stream-beneath-the-hills
+bug-reports:    https://github.com/duairc/opaleye-of-the-stream-beneath-the-hills/issues
 
 extra-source-files:
   LICENSE
@@ -20,7 +20,7 @@ library
     src
 
   exposed-modules:
-    Data.Anonymous.Opaleye
+    Opaleye.StreamBeneathTheHills
 
   build-depends:
     aeson,
@@ -47,4 +47,4 @@ library
 
 source-repository head
   type:     git
-  location: https://github.com/duairc/anonymous-types.git
+  location: https://github.com/duairc/opaleye-of-the-stream-beneath-the-hills.git

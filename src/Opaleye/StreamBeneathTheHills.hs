@@ -17,7 +17,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Data.Anonymous.Opaleye
+module Opaleye.StreamBeneathTheHills
     ( PGRep
     , PG
     , UnPG
