@@ -58,7 +58,7 @@ import           Data.Anonymous.Profunctor
 
 -- base ----------------------------------------------------------------------
 import           Control.Applicative (Const (Const))
-import           Control.Arrow (returnA)
+import           Control.Arrow ((>>>), arr, returnA)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Functor.Identity (Identity (Identity))
 import           Data.Int (Int16, Int32, Int64)
@@ -101,7 +101,7 @@ import           Opaleye.PGTypes
                      , PGTimestamptz
                      , PGUuid
                      )
-import           Opaleye.QueryArr (Query)
+import           Opaleye.QueryArr (Query, QueryArr)
 import           Opaleye.RunQuery (QueryRunner, runQuery)
 import           Opaleye.Table (Table (Table), TableProperties)
 import qualified Opaleye.Table as O (optional, required)
@@ -112,7 +112,7 @@ import           Database.PostgreSQL.Simple (Connection)
 
 
 -- profunctors ---------------------------------------------------------------
-import           Data.Profunctor (dimap)
+import           Data.Profunctor (dimap, lmap)
 
 
 -- product-profunctors -------------------------------------------------------
@@ -495,10 +495,18 @@ type family UnPGMapSnd (as :: [(s, *)]) :: [(s, *)] where
 
 
 ------------------------------------------------------------------------------
-run :: (PGRep a p, Default QueryRunner p a)
-    => Query p
-    -> ReaderT Connection IO [a]
-run query = ask >>= \connection -> liftIO (runQuery connection query)
+run
+    ::
+        ( Default Constant ai pi
+        , Default QueryRunner po ao
+        , PGRep ai pi
+        , PGRep ao po
+        )
+    => ai
+    -> QueryArr pi po
+    -> ReaderT Connection IO [ao]
+run i query = ask >>= \connection -> liftIO (runQuery connection
+    (arr (const (pg i)) >>> query))
 
 
 ------------------------------------------------------------------------------
@@ -918,7 +926,9 @@ instance (Orderable (g a), Orderable (Product g as)) =>
 
 
 ------------------------------------------------------------------------------
-ordered :: Orderable a => Query (a, b) -> Query b
-ordered query = proc () -> do
-    (_, result) <- orderBy (contramap fst ordering) query -< ()
-    returnA -< result
+ordered
+    :: (Default Constant ai pi, PGRep ai pi, Orderable a)
+    => ai
+    -> QueryArr pi (a, b)
+    -> Query (a, b)
+ordered i = orderBy (contramap fst ordering) . lmap (const (pg i))
