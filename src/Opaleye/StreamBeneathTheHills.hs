@@ -1,21 +1,27 @@
-{-# LANGUAGE AllowAmbiguousTypes #-}
-{-# LANGUAGE Arrows #-}
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE InstanceSigs #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE TypeApplications #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+
+#include "kinds.h"
+
+#ifdef SafeHaskell
+{-# LANGUAGE Trustworthy #-}
+#endif
+
+#ifdef DataPolyKinds
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE PolyKinds #-}
+#endif
 
 module Opaleye.StreamBeneathTheHills
     ( PGRep
@@ -58,13 +64,16 @@ import           Data.Anonymous.Profunctor
 
 -- base ----------------------------------------------------------------------
 import           Control.Applicative (Const (Const))
-import           Control.Arrow ((>>>), arr, returnA)
 import           Control.Monad.IO.Class (liftIO)
 import           Data.Functor.Identity (Identity (Identity))
 import           Data.Int (Int16, Int32, Int64)
-import           Data.Monoid ((<>))
-import           Data.Proxy (Proxy (Proxy))
-import           GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
+import           Data.Monoid
+                     ( (<>)
+#if !MIN_VERSION_base(4, 8, 0)
+                     , mconcat
+                     , mempty
+#endif
+                     )
 
 
 -- bytestring ----------------------------------------------------------------
@@ -137,8 +146,21 @@ import           Data.Time.Clock (UTCTime)
 import           Data.Time.LocalTime (LocalTime, TimeOfDay)
 
 
--- uuid ----------------------------------------------------------------------
-import           Data.UUID (UUID)
+-- types ---------------------------------------------------------------------
+import           GHC.TypeLits.Compat
+                     ( KnownSymbol
+#ifdef DataPolyKinds
+                     , Symbol
+#endif
+                     , symbolVal
+                     )
+import           Type.List (Cons, Nil)
+import           Type.Meta (Proxy (Proxy))
+import           Type.Tuple.Pair (Pair)
+
+
+-- uuid-types ----------------------------------------------------------------
+import           Data.UUID.Types (UUID)
 
 
 ------------------------------------------------------------------------------
@@ -156,7 +178,7 @@ instance PGRep a p => PGRep (Const a b) (Const p b) where
 ------------------------------------------------------------------------------
 instance PGRep a p => PGRep (Identity a) (Identity p) where
     type PG (Identity a) = Identity (PG a)
-    type UnPG (Identity a) = Identity (UnPG a)
+    type UnPG (Identity p) = Identity (UnPG p)
 
 
 ------------------------------------------------------------------------------
@@ -282,9 +304,9 @@ instance
 
 
 ------------------------------------------------------------------------------
-instance PGRep (Product g '[]) (Product g '[]) where
-    type PG (Product g '[]) = Product g '[]
-    type UnPG (Product g '[]) = Product g '[]
+instance PGRep (Product g Nil) (Product g Nil) where
+    type PG (Product g Nil) = Product g Nil
+    type UnPG (Product g Nil) = Product g Nil
 
 
 ------------------------------------------------------------------------------
@@ -295,10 +317,10 @@ instance
     , UnPG (Tuple ps) ~ Tuple (UnPGMap ps)
     )
   =>
-    PGRep (Tuple (a ': as)) (Tuple (p ': ps))
+    PGRep (Tuple (Cons a as)) (Tuple (Cons p ps))
   where
-    type PG (Tuple (a ': as)) = Tuple (PG a ': PGMap as)
-    type UnPG (Tuple (p ': ps)) = Tuple (UnPG p ': UnPGMap ps)
+    type PG (Tuple (Cons a as)) = Tuple (Cons (PG a) (PGMap as))
+    type UnPG (Tuple (Cons p ps)) = Tuple (Cons (UnPG p) (UnPGMap ps))
 
 
 ------------------------------------------------------------------------------
@@ -309,11 +331,12 @@ instance
     , UnPG (Record ps) ~ Record (UnPGMapSnd ps)
     )
   =>
-    PGRep (Record ('(s, a) ': as)) (Record ('(s, p) ': ps))
+    PGRep (Record (Cons (Pair s a) as)) (Record (Cons (Pair s p) ps))
   where
-    type PG (Record ('(s, a) ': as)) = Record ('(s, PG a) ': PGMapSnd as)
-    type UnPG (Record ('(s, p) ': ps)) =
-        Record ('(s, UnPG p) ': UnPGMapSnd ps)
+    type PG (Record (Cons (Pair s a) as)) =
+        Record (Cons (Pair s (PG a)) (PGMapSnd as))
+    type UnPG (Record (Cons (Pair s p) ps)) =
+        Record (Cons (Pair s (UnPG p)) (UnPGMapSnd ps))
 
 
 ------------------------------------------------------------------------------
@@ -471,27 +494,65 @@ type instance UnPGScalar PGJsonb = Value
 
 
 ------------------------------------------------------------------------------
-type family PGMap (as :: [*]) :: [*] where
-    PGMap '[] = '[]
-    PGMap (a ': as) = PG a ': PGMap as
+type family PGMap (as :: KList (*)) :: KList (*)
+#ifdef ClosedTypeFamilies
+  where
+#endif
+#ifndef ClosedTypeFamilies
+type instance
+#endif
+    PGMap Nil = Nil
+#ifndef ClosedTypeFamilies
+type instance
+#endif
+    PGMap (Cons a as) = Cons (PG a) (PGMap as)
 
 
 ------------------------------------------------------------------------------
-type family PGMapSnd (as :: [(s, *)]) :: [(s, *)] where
-    PGMapSnd '[] = '[]
-    PGMapSnd ('(s, a) ': as) = '(s, PG a) ': PGMapSnd as
+type family PGMapSnd (as :: KList (KPair (KPoly1, *)))
+    :: KList (KPair (KPoly1, *))
+#ifdef ClosedTypeFamilies
+  where
+#endif
+#ifndef ClosedTypeFamilies
+type instance
+#endif
+    PGMapSnd Nil = Nil
+#ifndef ClosedTypeFamilies
+type instance
+#endif
+    PGMapSnd (Cons (Pair s a) as) = Cons (Pair s (PG a)) (PGMapSnd as)
 
 
 ------------------------------------------------------------------------------
-type family UnPGMap (as :: [*]) :: [*] where
-    UnPGMap '[] = '[]
-    UnPGMap (a ': as) = UnPG a ': UnPGMap as
+type family UnPGMap (as :: KList (*)) :: KList (*)
+#ifdef ClosedTypeFamilies
+  where
+#endif
+#ifndef ClosedTypeFamilies
+type instance
+#endif
+    UnPGMap Nil = Nil
+#ifndef ClosedTypeFamilies
+type instance
+#endif
+    UnPGMap (Cons a as) = Cons (UnPG a) (UnPGMap as)
 
 
 ------------------------------------------------------------------------------
-type family UnPGMapSnd (as :: [(s, *)]) :: [(s, *)] where
-    UnPGMapSnd '[] = '[]
-    UnPGMapSnd ('(s, a) ': as) = '(s, UnPG a) ': UnPGMapSnd as
+type family UnPGMapSnd (as :: KList (KPair (KPoly1, *)))
+    :: KList (KPair (KPoly1, *))
+#ifdef ClosedTypeFamilies
+  where
+#endif
+#ifndef ClosedTypeFamilies
+type instance
+#endif
+    UnPGMapSnd Nil = Nil
+#ifndef ClosedTypeFamilies
+type instance
+#endif
+    UnPGMapSnd (Cons (Pair s a) as) = Cons (Pair s (UnPG a)) (UnPGMapSnd as)
 
 
 ------------------------------------------------------------------------------
@@ -506,7 +567,7 @@ run
     -> QueryArr pi po
     -> ReaderT Connection IO [ao]
 run i query = ask >>= \connection -> liftIO (runQuery connection
-    (arr (const (pg i)) >>> query))
+    (lmap (\_ -> pg i) query))
 
 
 ------------------------------------------------------------------------------
@@ -519,7 +580,7 @@ class Required a where
     required'
         :: KnownSymbol s
         => String
-        -> Uncurry Field '(s, TableProperties a a)
+        -> Uncurry Field (Pair s (TableProperties a a))
 
 
 ------------------------------------------------------------------------------
@@ -547,7 +608,7 @@ class Optional a where
     optional'
         :: KnownSymbol s
         => String
-        -> Uncurry Field '(s, TableProperties (Maybe a) a)
+        -> Uncurry Field (Pair s (TableProperties (Maybe a) a))
 
 
 ------------------------------------------------------------------------------
@@ -576,23 +637,23 @@ instance Optional a => Optional (Tagged s a) where
 required
     :: forall s a. (KnownSymbol s, Required a)
     => String
-    -> Uncurry Field '(s, TableProperties a a)
-required = required' @a @s
+    -> Uncurry Field (Pair s (TableProperties a a))
+required = required'
 
 
 ------------------------------------------------------------------------------
 optional
     :: forall s a. (KnownSymbol s, Optional a)
     => String
-    -> Uncurry Field '(s, TableProperties (Maybe a) a)
-optional = optional' @a @s
+    -> Uncurry Field (Pair s (TableProperties (Maybe a) a))
+optional = optional'
 
 
 ------------------------------------------------------------------------------
 class MakeTableProperties
-    (abs :: [(Symbol, *)])
-    (as :: [(Symbol, *)])
-    (bs :: [(Symbol, *)])
+    (abs :: KList (KPair (KString, *)))
+    (as :: KList (KPair (KString, *)))
+    (bs :: KList (KPair (KString, *)))
         | abs -> as
         , abs -> bs
   where
@@ -600,28 +661,28 @@ class MakeTableProperties
 
 
 ------------------------------------------------------------------------------
-instance MakeTableProperties '[] '[] '[] where
+instance MakeTableProperties Nil Nil Nil where
     properties = Nil
 
 
 ------------------------------------------------------------------------------
 instance (KnownSymbol s, MakeTableProperties abs as bs, Required a) =>
     MakeTableProperties
-        ('(s, TableProperties a a) ': abs)
-        ('(s, a) ': as)
-        ('(s, a) ': bs)
+        (Cons (Pair s (TableProperties a a)) abs)
+        (Cons (Pair s a) as)
+        (Cons (Pair s a) bs)
   where
-    properties = Cons (required @s @a (symbolVal @s Proxy)) properties
+    properties = Cons (required (symbolVal (Proxy :: Proxy s))) properties
 
 
 ------------------------------------------------------------------------------
 instance (KnownSymbol s, MakeTableProperties abs as bs, Optional a) =>
     MakeTableProperties
-        ('(s, TableProperties (Maybe a) a) ': abs)
-        ('(s, Maybe a) ': as)
-        ('(s, a) ': bs)
+        (Cons (Pair s (TableProperties (Maybe a) a)) abs)
+        (Cons (Pair s (Maybe a)) as)
+        (Cons (Pair s a) bs)
   where
-    properties = Cons (optional @s @a (symbolVal @s Proxy)) properties
+    properties = Cons (optional (symbolVal (Proxy :: Proxy s))) properties
 
 
 ------------------------------------------------------------------------------
@@ -670,8 +731,8 @@ instance Orderable a => Orderable (Field s a) where
 
 
 ------------------------------------------------------------------------------
-instance Orderable (f a b) => Orderable (Uncurry f '(a, b)) where
-    ordering = contramap (\(Uncurry f) -> f) (ordering @(f a b))
+instance Orderable (f a b) => Orderable (Uncurry f (Pair a b)) where
+    ordering = contramap (\(Uncurry f) -> f) (ordering :: Order (f a b))
 
 
 ------------------------------------------------------------------------------
@@ -912,16 +973,16 @@ instance
 
 
 ------------------------------------------------------------------------------
-instance Orderable (Product g '[]) where
+instance Orderable (Product g Nil) where
     ordering = mempty
 
 
 ------------------------------------------------------------------------------
 instance (Orderable (g a), Orderable (Product g as)) =>
-    Orderable (Product g (a ': as))
+    Orderable (Product g (Cons a as))
   where
-    ordering = contramap (\(Cons a _) -> a) (ordering @(g a)) <>
-        contramap (\(Cons _ as) -> as) (ordering @(Product g as))
+    ordering = contramap (\(Cons a _) -> a) (ordering :: Order (g a)) <>
+        contramap (\(Cons _ as) -> as) (ordering :: Order (Product g as))
 
 
 
