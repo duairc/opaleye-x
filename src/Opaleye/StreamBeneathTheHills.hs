@@ -49,13 +49,13 @@ where
 import           Data.Aeson (Value)
 
 
--- anonymous-types -----------------------------------------------------------
+-- anonymous-data ------------------------------------------------------------
 import           Data.Anonymous.Product (Product (Cons, Nil), Record, Tuple)
 import           Data.Field (Field (Field))
 import           Data.Uncurry (Uncurry (Uncurry), umap)
 
 
--- anonymous-types-product-profunctors ---------------------------------------
+-- anonymous-data-product-profunctors ----------------------------------------
 import           Data.Anonymous.Profunctor
                      ( ProductAdaptor
                      , pRecord
