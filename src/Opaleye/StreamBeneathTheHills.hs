@@ -27,6 +27,7 @@ module Opaleye.StreamBeneathTheHills
     ( PGRep
     , PG
     , UnPG
+    , Run
     , run
     , pg
     , PGScalar
@@ -51,8 +52,8 @@ import           Data.Aeson (Value)
 
 -- anonymous-data ------------------------------------------------------------
 import           Data.Anonymous.Product (Product (Cons, Nil), Record, Tuple)
-import           Data.Field (Field (Field))
-import           Data.Uncurry (Uncurry (Uncurry), umap)
+import           Data.Field (Field)
+import qualified Data.Field as F (fmap, fold, pure)
 
 
 -- anonymous-data-product-profunctors ----------------------------------------
@@ -188,9 +189,9 @@ instance PGRep a p => PGRep (Tagged s a) (Tagged s p) where
 
 
 ------------------------------------------------------------------------------
-instance PGRep a p => PGRep (Field s a) (Field s p) where
-    type PG (Field s a) = Field s (PG a)
-    type UnPG (Field s p) = Field s (UnPG p)
+instance PGRep a p => PGRep (Field (Pair s a)) (Field (Pair s p)) where
+    type PG (Field (Pair s a)) = Field (Pair s (PG a))
+    type UnPG (Field (Pair s p)) = Field (Pair s (UnPG p))
 
 
 ------------------------------------------------------------------------------
@@ -556,8 +557,8 @@ type instance
 
 
 ------------------------------------------------------------------------------
-run
-    ::
+type Run m ai pi po ao
+    =
         ( Default Constant ai pi
         , Default QueryRunner po ao
         , PGRep ai pi
@@ -565,7 +566,11 @@ run
         )
     => ai
     -> QueryArr pi po
-    -> ReaderT Connection IO [ao]
+    -> m [ao]
+
+
+------------------------------------------------------------------------------
+run :: Run (ReaderT Connection IO) ai pi po ao
 run i query = ask >>= \connection -> liftIO (runQuery connection
     (lmap (\_ -> pg i) query))
 
@@ -580,27 +585,27 @@ class Required a where
     required'
         :: KnownSymbol s
         => String
-        -> Uncurry Field (Pair s (TableProperties a a))
+        -> Field (Pair s (TableProperties a a))
 
 
 ------------------------------------------------------------------------------
 instance Required (Column a) where
-    required' = Uncurry . Field . O.required
+    required' = F.pure . O.required
 
 
 ------------------------------------------------------------------------------
 instance Required a => Required (Identity a) where
-    required' = umap (fmap (dimap (\(Identity a) -> a) Identity)) . required'
+    required' = F.fmap (dimap (\(Identity a) -> a) Identity) . required'
 
 
 ------------------------------------------------------------------------------
 instance Required a => Required (Const a b) where
-    required' = umap (fmap (dimap (\(Const a) -> a) Const)) . required'
+    required' = F.fmap (dimap (\(Const a) -> a) Const) . required'
 
 
 ------------------------------------------------------------------------------
 instance Required a => Required (Tagged s a) where
-    required' = umap (fmap (dimap (\(Tagged a) -> a) Tagged)) . required'
+    required' = F.fmap (dimap (\(Tagged a) -> a) Tagged) . required'
 
 
 ------------------------------------------------------------------------------
@@ -608,28 +613,28 @@ class Optional a where
     optional'
         :: KnownSymbol s
         => String
-        -> Uncurry Field (Pair s (TableProperties (Maybe a) a))
+        -> Field (Pair s (TableProperties (Maybe a) a))
 
 
 ------------------------------------------------------------------------------
 instance Optional (Column a) where
-    optional' = Uncurry . Field . O.optional
+    optional' = F.pure . O.optional
 
 
 ------------------------------------------------------------------------------
 instance Optional a => Optional (Identity a) where
-    optional' = umap (fmap (dimap (fmap (\(Identity a) -> a)) Identity))
+    optional' = F.fmap (dimap (fmap (\(Identity a) -> a)) Identity)
         . optional'
 
 
 ------------------------------------------------------------------------------
 instance Optional a => Optional (Const a b) where
-    optional' = umap (fmap (dimap (fmap (\(Const a) -> a)) Const)) . optional'
+    optional' = F.fmap (dimap (fmap (\(Const a) -> a)) Const) . optional'
 
 
 ------------------------------------------------------------------------------
 instance Optional a => Optional (Tagged s a) where
-    optional' = umap (fmap (dimap (fmap (\(Tagged a) -> a)) Tagged))
+    optional' = F.fmap (dimap (fmap (\(Tagged a) -> a)) Tagged)
         . optional'
 
 
@@ -637,7 +642,7 @@ instance Optional a => Optional (Tagged s a) where
 required
     :: forall s a. (KnownSymbol s, Required a)
     => String
-    -> Uncurry Field (Pair s (TableProperties a a))
+    -> Field (Pair s (TableProperties a a))
 required = required'
 
 
@@ -645,7 +650,7 @@ required = required'
 optional
     :: forall s a. (KnownSymbol s, Optional a)
     => String
-    -> Uncurry Field (Pair s (TableProperties (Maybe a) a))
+    -> Field (Pair s (TableProperties (Maybe a) a))
 optional = optional'
 
 
@@ -693,7 +698,7 @@ type Table' a = Table a a
 table
     ::
         ( MakeTableProperties abs as bs
-        , ProductAdaptor TableProperties (Uncurry Field) abs as bs
+        , ProductAdaptor TableProperties Field abs as bs
         )
     => String
     -> Table (Record as) (Record bs)
@@ -726,13 +731,8 @@ instance Orderable a => Orderable (Tagged s a) where
 
 
 ------------------------------------------------------------------------------
-instance Orderable a => Orderable (Field s a) where
-    ordering = contramap (\(Field a) -> a) ordering
-
-
-------------------------------------------------------------------------------
-instance Orderable (f a b) => Orderable (Uncurry f (Pair a b)) where
-    ordering = contramap (\(Uncurry f) -> f) (ordering :: Order (f a b))
+instance Orderable a => Orderable (Field (Pair s a)) where
+    ordering = contramap F.fold ordering
 
 
 ------------------------------------------------------------------------------
