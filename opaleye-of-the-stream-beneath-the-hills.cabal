@@ -26,7 +26,7 @@ library
     Opaleye.StreamBeneathTheHills
 
   build-depends:
-    aeson >= 0.1 && < 1,
+    aeson >= 0.1 && < 1.2,
     anonymous-data >= 0.1 && < 0.2,
     anonymous-data-product-profunctors >= 0.1 && < 0.2,
     base >= 4.5 && < 5,
