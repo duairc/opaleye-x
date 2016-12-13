@@ -52,8 +52,7 @@ import           Data.Aeson (Value)
 
 -- anonymous-data ------------------------------------------------------------
 import           Data.Anonymous.Product (Product (Cons, Nil), Record, Tuple)
-import           Data.Field (Field)
-import qualified Data.Field as F (fmap, fold, pure)
+import           Data.Labeled (Labeled (Labeled), Field)
 
 
 -- anonymous-data-product-profunctors ----------------------------------------
@@ -581,6 +580,12 @@ pg = constant
 
 
 ------------------------------------------------------------------------------
+lfmap :: (a -> b) -> Field (Pair s a) -> Field (Pair s b)
+lfmap f (Labeled (Identity a)) = Labeled (Identity (f a))
+{-# INLINE lfmap #-}
+
+
+------------------------------------------------------------------------------
 class Required a where
     required'
         :: KnownSymbol s
@@ -590,22 +595,22 @@ class Required a where
 
 ------------------------------------------------------------------------------
 instance Required (Column a) where
-    required' = F.pure . O.required
+    required' = Labeled . Identity . O.required
 
 
 ------------------------------------------------------------------------------
 instance Required a => Required (Identity a) where
-    required' = F.fmap (dimap (\(Identity a) -> a) Identity) . required'
+    required' = lfmap (dimap (\(Identity a) -> a) Identity) . required'
 
 
 ------------------------------------------------------------------------------
 instance Required a => Required (Const a b) where
-    required' = F.fmap (dimap (\(Const a) -> a) Const) . required'
+    required' = lfmap (dimap (\(Const a) -> a) Const) . required'
 
 
 ------------------------------------------------------------------------------
 instance Required a => Required (Tagged s a) where
-    required' = F.fmap (dimap (\(Tagged a) -> a) Tagged) . required'
+    required' = lfmap (dimap (\(Tagged a) -> a) Tagged) . required'
 
 
 ------------------------------------------------------------------------------
@@ -618,23 +623,23 @@ class Optional a where
 
 ------------------------------------------------------------------------------
 instance Optional (Column a) where
-    optional' = F.pure . O.optional
+    optional' = Labeled . Identity . O.optional
 
 
 ------------------------------------------------------------------------------
 instance Optional a => Optional (Identity a) where
-    optional' = F.fmap (dimap (fmap (\(Identity a) -> a)) Identity)
+    optional' = lfmap (dimap (fmap (\(Identity a) -> a)) Identity)
         . optional'
 
 
 ------------------------------------------------------------------------------
 instance Optional a => Optional (Const a b) where
-    optional' = F.fmap (dimap (fmap (\(Const a) -> a)) Const) . optional'
+    optional' = lfmap (dimap (fmap (\(Const a) -> a)) Const) . optional'
 
 
 ------------------------------------------------------------------------------
 instance Optional a => Optional (Tagged s a) where
-    optional' = F.fmap (dimap (fmap (\(Tagged a) -> a)) Tagged)
+    optional' = lfmap (dimap (fmap (\(Tagged a) -> a)) Tagged)
         . optional'
 
 
@@ -731,8 +736,11 @@ instance Orderable a => Orderable (Tagged s a) where
 
 
 ------------------------------------------------------------------------------
-instance Orderable a => Orderable (Field (Pair s a)) where
-    ordering = contramap F.fold ordering
+instance Orderable (f a) => Orderable (Labeled f (Pair s a)) where
+    ordering = contramap unlabel ordering
+      where
+        unlabel :: Labeled f (Pair s a) -> f a
+        unlabel (Labeled a) = a
 
 
 ------------------------------------------------------------------------------
