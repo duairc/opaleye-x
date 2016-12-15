@@ -27,13 +27,13 @@ module Opaleye.StreamBeneathTheHills
     ( PGRep
     , PG
     , UnPG
-    , Run
-    , run
     , pg
+
     , PGScalar
     , UnPGScalar
-    , Table'
+
     , table
+
     , Required
     , required
     , Optional
@@ -43,6 +43,19 @@ module Opaleye.StreamBeneathTheHills
     , Orderable
     , ordering
     , ordered
+
+    , In
+    , Out
+
+    , query
+    , queryFirst
+    , insert
+    , insertMany
+    , insertReturning
+    , insertReturningFirst
+    , update
+    , updateReturning
+    , updateReturningFirst
     )
 where
 
@@ -64,7 +77,6 @@ import           Data.Anonymous.Profunctor
 
 -- base ----------------------------------------------------------------------
 import           Control.Applicative (Const (Const))
-import           Control.Monad.IO.Class (liftIO)
 import           Data.Functor.Identity (Identity (Identity))
 import           Data.Int (Int16, Int32, Int64)
 import           Data.Monoid
@@ -111,13 +123,24 @@ import           Opaleye.PGTypes
                      , PGUuid
                      )
 import           Opaleye.QueryArr (Query, QueryArr)
-import           Opaleye.RunQuery (QueryRunner, runQuery)
+import           Opaleye.RunQuery (QueryRunner)
 import           Opaleye.Table (Table (Table), TableProperties)
 import qualified Opaleye.Table as O (optional, required)
 
 
--- postgresql-simple ---------------------------------------------------------
-import           Database.PostgreSQL.Simple (Connection)
+-- opaleye-trans -------------------------------------------------------------
+import           Opaleye.Trans (Transaction)
+import qualified Opaleye.Trans as T
+                     ( query
+                     , queryFirst
+                     , insert
+                     , insertMany
+                     , insertReturning
+                     , insertReturningFirst
+                     , update
+                     , updateReturning
+                     , updateReturningFirst
+                     )
 
 
 -- profunctors ---------------------------------------------------------------
@@ -130,10 +153,6 @@ import           Data.Profunctor.Product.Default (Default)
 
 -- tagged --------------------------------------------------------------------
 import           Data.Tagged (Tagged (Tagged))
-
-
--- transformers --------------------------------------------------------------
-import           Control.Monad.Trans.Reader (ReaderT, ask)
 
 
 -- text ----------------------------------------------------------------------
@@ -556,25 +575,6 @@ type instance
 
 
 ------------------------------------------------------------------------------
-type Run m ai pi po ao
-    =
-        ( Default Constant ai pi
-        , Default QueryRunner po ao
-        , PGRep ai pi
-        , PGRep ao po
-        )
-    => ai
-    -> QueryArr pi po
-    -> m [ao]
-
-
-------------------------------------------------------------------------------
-run :: Run (ReaderT Connection IO) ai pi po ao
-run i query = ask >>= \connection -> liftIO (runQuery connection
-    (lmap (\_ -> pg i) query))
-
-
-------------------------------------------------------------------------------
 pg :: (PGRep a p, Default Constant a p) => a -> p
 pg = constant
 
@@ -693,10 +693,6 @@ instance (KnownSymbol s, MakeTableProperties abs as bs, Optional a) =>
         (Cons (Pair s a) bs)
   where
     properties = Cons (optional (symbolVal (Proxy :: Proxy s))) properties
-
-
-------------------------------------------------------------------------------
-type Table' a = Table a a
 
 
 ------------------------------------------------------------------------------
@@ -993,7 +989,6 @@ instance (Orderable (g a), Orderable (Product g as)) =>
         contramap (\(Cons _ as) -> as) (ordering :: Order (Product g as))
 
 
-
 ------------------------------------------------------------------------------
 ordered
     :: (Default Constant ai pi, PGRep ai pi, Orderable a)
@@ -1001,3 +996,77 @@ ordered
     -> QueryArr pi (a, b)
     -> Query (a, b)
 ordered i = orderBy (contramap fst ordering) . lmap (const (pg i))
+
+
+------------------------------------------------------------------------------
+class (Default Constant a p, PGRep a p) => In a p | a -> p, p -> a
+instance (Default Constant a p, PGRep a p) => In a p
+
+
+------------------------------------------------------------------------------
+class (Default QueryRunner p a, PGRep a p) => Out p a | a -> p, p -> a
+instance (Default QueryRunner p a, PGRep a p) => Out p a
+
+
+------------------------------------------------------------------------------
+query :: (In a a', Out b' b) => QueryArr a' b' -> a -> Transaction [b]
+query q a = T.query (lmap (\_ -> pg a) q)
+
+
+------------------------------------------------------------------------------
+queryFirst :: (In a a', Out b' b)
+    => QueryArr a' b' -> a -> Transaction (Maybe b)
+queryFirst q a = T.queryFirst (lmap (\_ -> pg a) q)
+
+
+------------------------------------------------------------------------------
+insert :: In a w => Table w r -> a -> Transaction Int64
+insert t = T.insert t . pg
+
+
+------------------------------------------------------------------------------
+insertMany :: In a w => Table w r -> [a] -> Transaction Int64
+insertMany t = T.insertMany t . map pg
+
+
+------------------------------------------------------------------------------
+insertReturning :: (In a w, Out r' b)
+    => Table w r
+    -> (r -> r')
+    -> a
+    -> Transaction [b]
+insertReturning t f = T.insertReturning t f . pg
+
+
+------------------------------------------------------------------------------
+insertReturningFirst :: (In a w, Out r' b)
+    => Table w r
+    -> (r -> r')
+    -> a
+    -> Transaction (Maybe b)
+insertReturningFirst t f = T.insertReturningFirst t f . pg
+
+
+------------------------------------------------------------------------------
+update :: Table w r -> (r -> w) -> (r -> PG Bool) -> Transaction Int64
+update = T.update
+
+
+------------------------------------------------------------------------------
+updateReturning :: Default QueryRunner r' a
+    => Table w r
+    -> (r -> w)
+    -> (r -> PG Bool)
+    -> (r -> r')
+    -> Transaction [a]
+updateReturning = T.updateReturning
+
+
+------------------------------------------------------------------------------
+updateReturningFirst :: Default QueryRunner r' a
+    => Table w r
+    -> (r -> w)
+    -> (r -> PG Bool)
+    -> (r -> r')
+    -> Transaction (Maybe a)
+updateReturningFirst = T.updateReturningFirst
