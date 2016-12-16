@@ -1,9 +1,13 @@
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE DataKinds #-}
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
@@ -23,6 +27,8 @@
 {-# LANGUAGE PolyKinds #-}
 #endif
 
+{-# OPTIONS_GHC -fno-warn-orphans #-}
+
 module Opaleye.StreamBeneathTheHills
     ( PGRep
     , PG
@@ -37,6 +43,7 @@ module Opaleye.StreamBeneathTheHills
     , required
     , Optional
     , optional
+    , Option (Option)
 
     , MakeTableProperties
     , properties
@@ -82,16 +89,17 @@ import           Data.Anonymous.Profunctor
 
 
 -- base ----------------------------------------------------------------------
-import           Control.Applicative (Const (Const))
+import           Control.Applicative (Const (Const), Alternative)
+import           Control.Monad (MonadPlus)
 import           Data.Functor.Identity (Identity (Identity))
 import           Data.Int (Int16, Int32, Int64)
-import           Data.Monoid
-                     ( (<>)
-#if !MIN_VERSION_base(4, 8, 0)
-                     , mconcat
-                     , mempty
+import           Data.Traversable (Traversable)
+#if MIN_VERSION_base(4, 9, 0)
+import           Data.Semigroup (Semigroup)
 #endif
-                     )
+import           Data.Monoid ((<>))
+import           Data.Typeable (Typeable)
+import           GHC.Generics (Generic, Generic1)
 
 
 -- bytestring ----------------------------------------------------------------
@@ -150,11 +158,11 @@ import qualified Opaleye.Trans as T
 
 
 -- profunctors ---------------------------------------------------------------
-import           Data.Profunctor (dimap, lmap)
+import           Data.Profunctor (Profunctor, dimap, lmap)
 
 
 -- product-profunctors -------------------------------------------------------
-import           Data.Profunctor.Product.Default (Default)
+import           Data.Profunctor.Product.Default (Default, def)
 
 
 -- tagged --------------------------------------------------------------------
@@ -189,395 +197,147 @@ import           Data.UUID.Types (UUID)
 
 
 ------------------------------------------------------------------------------
-class (PG a ~ p, UnPG p ~ a) => PGRep a p | p -> a, a -> p where
-    type PG a :: *
-    type UnPG p :: *
+type family PGScalar (a :: *) :: * where
+    PGScalar Bool = PGBool
+    PGScalar ByteString = PGBytea
+    PGScalar (CI Text) = PGCitext
+    PGScalar Day = PGDate
+    PGScalar Double = PGFloat8
+    PGScalar Float = PGFloat4
+    PGScalar Int16 = PGInt2
+    PGScalar Int32 = PGInt4
+    PGScalar Int64 = PGInt8
+    PGScalar LocalTime = PGTimestamp
+    PGScalar Text = PGText
+    PGScalar TimeOfDay = PGTime
+    PGScalar UTCTime = PGTimestamptz
+    PGScalar UUID = PGUuid
+    PGScalar Value = PGJsonb
 
 
 ------------------------------------------------------------------------------
-instance PGRep a p => PGRep (Const a b) (Const p b) where
-    type PG (Const a b) = Const (PG a) b
-    type UnPG (Const p b) = Const (UnPG p) b
+type family UnPGScalar (a :: *) :: * where
+    UnPGScalar PGBool = Bool
+    UnPGScalar PGBytea = ByteString
+    UnPGScalar PGCitext = (CI Text)
+    UnPGScalar PGDate = Day
+    UnPGScalar PGFloat8 = Double
+    UnPGScalar PGFloat4 = Float
+    UnPGScalar PGInt2 = Int16
+    UnPGScalar PGInt4 = Int32
+    UnPGScalar PGInt8 = Int64
+    UnPGScalar PGTimestamp = LocalTime
+    UnPGScalar PGText = Text
+    UnPGScalar PGTime = TimeOfDay
+    UnPGScalar PGTimestamptz = UTCTime
+    UnPGScalar PGUuid = UUID
+    UnPGScalar PGJsonb = Value
 
 
 ------------------------------------------------------------------------------
-instance PGRep a p => PGRep (Identity a) (Identity p) where
-    type PG (Identity a) = Identity (PG a)
-    type UnPG (Identity p) = Identity (UnPG p)
-
-
-------------------------------------------------------------------------------
-instance PGRep a p => PGRep (Tagged s a) (Tagged s p) where
-    type PG (Tagged s a) = Tagged s (PG a)
-    type UnPG (Tagged s p) = Tagged s (UnPG p)
-
-
-------------------------------------------------------------------------------
-instance PGRep a p => PGRep (Field (Pair s a)) (Field (Pair s p)) where
-    type PG (Field (Pair s a)) = Field (Pair s (PG a))
-    type UnPG (Field (Pair s p)) = Field (Pair s (UnPG p))
-
-
-------------------------------------------------------------------------------
-instance PGRep () () where
-    type PG () = ()
-    type UnPG () = ()
-
-
-------------------------------------------------------------------------------
-instance (PGRep a pa, PGRep b pb) => PGRep (a, b) (pa, pb) where
-    type PG (a, b) = (PG a, PG b)
-    type UnPG (pa, pb) = (UnPG pa, UnPG pb)
-
-
-------------------------------------------------------------------------------
-instance (PGRep a pa, PGRep b pb, PGRep c pc) => PGRep (a, b, c) (pa, pb, pc)
-  where
-    type PG (a, b, c) = (PG a, PG b, PG c)
-    type UnPG (pa, pb, pc) = (UnPG pa, UnPG pb, UnPG pc)
-
-
-------------------------------------------------------------------------------
-instance (PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd) =>
-    PGRep (a, b, c, d) (pa, pb, pc, pd)
-  where
-    type PG (a, b, c, d) = (PG a, PG b, PG c, PG d)
-    type UnPG (pa, pb, pc, pd) = (UnPG pa, UnPG pb, UnPG pc, UnPG pd)
-
-
-------------------------------------------------------------------------------
-instance (PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe) =>
-    PGRep (a, b, c, d, e) (pa, pb, pc, pd, pe)
-  where
-    type PG (a, b, c, d, e) = (PG a, PG b, PG c, PG d, PG e)
-    type UnPG (pa, pb, pc, pd, pe) =
-        (UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe)
-
-
-------------------------------------------------------------------------------
-instance
-    (PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe, PGRep f pf)
-  =>
-    PGRep (a, b, c, d, e, f) (pa, pb, pc, pd, pe, pf)
-  where
-    type PG (a, b, c, d, e, f) = (PG a, PG b, PG c, PG d, PG e, PG f)
-    type UnPG (pa, pb, pc, pd, pe, pf) =
-        (UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe, UnPG pf)
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe, PGRep f pf
-    , PGRep g pg
-    )
-  =>
-    PGRep (a, b, c, d, e, f, g) (pa, pb, pc, pd, pe, pf, pg)
-  where
-    type PG (a, b, c, d, e, f, g) = (PG a, PG b, PG c, PG d, PG e, PG f, PG g)
-    type UnPG (pa, pb, pc, pd, pe, pf, pg) =
-        (UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe, UnPG pf, UnPG pg)
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe, PGRep f pf
-    , PGRep g pg, PGRep h ph
-    )
-  =>
-    PGRep (a, b, c, d, e, f, g, h) (pa, pb, pc, pd, pe, pf, pg, ph)
-  where
-    type PG (a, b, c, d, e, f, g, h) =
+type family PG a :: * where
+    PG () = ()
+    PG (a, b) = (PG a, PG b)
+    PG (a, b, c) = (PG a, PG b, PG c)
+    PG (a, b, c, d) = (PG a, PG b, PG c, PG d)
+    PG (a, b, c, d, e) = (PG a, PG b, PG c, PG d, PG e)
+    PG (a, b, c, d, e, f) = (PG a, PG b, PG c, PG d, PG e, PG f)
+    PG (a, b, c, d, e, f, g) = (PG a, PG b, PG c, PG d, PG e, PG f, PG g)
+    PG (a, b, c, d, e, f, g, h) =
         (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h)
-    type UnPG (pa, pb, pc, pd, pe, pf, pg, ph) =
-        ( UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe, UnPG pf, UnPG pg
-        , UnPG ph
-        )
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe, PGRep f pf
-    , PGRep g pg, PGRep h ph, PGRep i pi
-    )
-  =>
-    PGRep (a, b, c, d, e, f, g, h, i) (pa, pb, pc, pd, pe, pf, pg, ph, pi)
-  where
-    type PG (a, b, c, d, e, f, g, h, i) =
+    PG (a, b, c, d, e, f, g, h, i) =
         (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i)
-    type UnPG (pa, pb, pc, pd, pe, pf, pg, ph, pi) =
-        ( UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe, UnPG pf, UnPG pg
-        , UnPG ph, UnPG pi
-        )
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRep a pa, PGRep b pb, PGRep c pc, PGRep d pd, PGRep e pe, PGRep f pf
-    , PGRep g pg, PGRep h ph, PGRep i pi, PGRep j pj
-    )
-  =>
-    PGRep
-        (a, b, c, d, e, f, g, h, i, j)
-        (pa, pb, pc, pd, pe, pf, pg, ph, pi, pj)
-  where
-    type PG (a, b, c, d, e, f, g, h, i, j) =
+    PG (a, b, c, d, e, f, g, h, i, j) =
         (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j)
-    type UnPG (pa, pb, pc, pd, pe, pf, pg, ph, pi, pj) =
-        ( UnPG pa, UnPG pb, UnPG pc, UnPG pd, UnPG pe, UnPG pf, UnPG pg
-        , UnPG ph, UnPG pi, UnPG pj
-        )
-
-
-------------------------------------------------------------------------------
-instance PGRep (Product g Nil) (Product g Nil) where
-    type PG (Product g Nil) = Product g Nil
-    type UnPG (Product g Nil) = Product g Nil
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRep a p
-    , PGRep (Tuple as) (Tuple ps)
-    , PG (Tuple as) ~ Tuple (PGMap as)
-    , UnPG (Tuple ps) ~ Tuple (UnPGMap ps)
-    )
-  =>
-    PGRep (Tuple (Cons a as)) (Tuple (Cons p ps))
-  where
-    type PG (Tuple (Cons a as)) = Tuple (Cons (PG a) (PGMap as))
-    type UnPG (Tuple (Cons p ps)) = Tuple (Cons (UnPG p) (UnPGMap ps))
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRep a p
-    , PGRep (Record as) (Record ps)
-    , PG (Record as) ~ Record (PGMapSnd as)
-    , UnPG (Record ps) ~ Record (UnPGMapSnd ps)
-    )
-  =>
-    PGRep (Record (Cons (Pair s a) as)) (Record (Cons (Pair s p) ps))
-  where
-    type PG (Record (Cons (Pair s a) as)) =
+    PG (Product g Nil) = Product g Nil
+    PG (Tuple (Cons a as)) = Tuple (Cons (PG a) (PGMap as))
+    PG (Record (Cons (Pair s a) as)) =
         Record (Cons (Pair s (PG a)) (PGMapSnd as))
-    type UnPG (Record (Cons (Pair s p) ps)) =
-        Record (Cons (Pair s (UnPG p)) (UnPGMapSnd ps))
+    PG (Option a) = Option (PG a)
+    PG (Const a b) = Const (PG a) b
+    PG (Identity a) = Identity (PG a)
+    PG (Tagged s a) = Tagged s (PG a)
+    PG (Field (Pair s a)) = Field (Pair s (PG a))
+    PG (Maybe (Const a b)) = Const (PG (Maybe a)) b
+    PG (Maybe (Identity a)) = Identity (PG (Maybe a))
+    PG (Maybe (Tagged s a)) = Tagged s (PG (Maybe a))
+    PG (Maybe (Field (Pair s a))) = Field (Pair s (PG (Maybe a)))
+    PG [a] = Column (PGArray (PGScalar a))
+    PG (Maybe a) = Column (Nullable (PGScalar a))
+    PG a = Column (PGScalar a)
 
 
 ------------------------------------------------------------------------------
-instance
-    ( PGRep a (Column p)
-    , p ~ PGScalar a
-    , a ~ UnPGScalar p
-    )
-  =>
-    PGRep (Maybe a) (Column (Nullable p))
-  where
-    type PG (Maybe a) = Column (Nullable (PGScalar a))
-    type UnPG (Column (Nullable p)) = Maybe (UnPGScalar p)
-
-
-------------------------------------------------------------------------------
-instance
-    ( PGRep a (Column p)
-    , p ~ PGScalar a
-    , a ~ UnPGScalar p
-    )
-  =>
-    PGRep [a] (Column (PGArray p))
-  where
-    type PG [a] = Column (PGArray (PGScalar a))
-    type UnPG (Column (PGArray p)) = [UnPGScalar p]
-
-
-------------------------------------------------------------------------------
-instance PGRep Bool (Column PGBool) where
-    type PG Bool = Column PGBool
-    type UnPG (Column PGBool) = Bool
-
-
-------------------------------------------------------------------------------
-instance PGRep ByteString (Column PGBytea) where
-    type PG ByteString = Column PGBytea
-    type UnPG (Column PGBytea) = ByteString
-
-
-------------------------------------------------------------------------------
-instance PGRep (CI Text) (Column PGCitext) where
-    type PG (CI Text) = Column PGCitext
-    type UnPG (Column PGCitext) = CI Text
-
-
-------------------------------------------------------------------------------
-instance PGRep Day (Column PGDate) where
-    type PG Day = Column PGDate
-    type UnPG (Column PGDate) = Day
-
-
-------------------------------------------------------------------------------
-instance PGRep Double (Column PGFloat8) where
-    type PG Double = Column PGFloat8
-    type UnPG (Column PGFloat8) = Double
-
-
-------------------------------------------------------------------------------
-instance PGRep Float (Column PGFloat4) where
-    type PG Float = Column PGFloat4
-    type UnPG (Column PGFloat4) = Float
-
-
-------------------------------------------------------------------------------
-instance PGRep Int16 (Column PGInt2) where
-    type PG Int16 = Column PGInt2
-    type UnPG (Column PGInt2) = Int16
-
-
-------------------------------------------------------------------------------
-instance PGRep Int32 (Column PGInt4) where
-    type PG Int32 = Column PGInt4
-    type UnPG (Column PGInt4) = Int32
-
-
-------------------------------------------------------------------------------
-instance PGRep Int64 (Column PGInt8) where
-    type PG Int64 = Column PGInt8
-    type UnPG (Column PGInt8) = Int64
-
-
-------------------------------------------------------------------------------
-instance PGRep LocalTime (Column PGTimestamp) where
-    type PG LocalTime = Column PGTimestamp
-    type UnPG (Column PGTimestamp) = LocalTime
-
-
-------------------------------------------------------------------------------
-instance PGRep Text (Column PGText) where
-    type PG Text = Column PGText
-    type UnPG (Column PGText) = Text
-
-
-------------------------------------------------------------------------------
-instance PGRep TimeOfDay (Column PGTime) where
-    type PG TimeOfDay = Column PGTime
-    type UnPG (Column PGTime) = TimeOfDay
-
-
-------------------------------------------------------------------------------
-instance PGRep UUID (Column PGUuid) where
-    type PG UUID = Column PGUuid
-    type UnPG (Column PGUuid) = UUID
-
-
-------------------------------------------------------------------------------
-instance PGRep UTCTime (Column PGTimestamptz) where
-    type PG UTCTime = Column PGTimestamptz
-    type UnPG (Column PGTimestamptz) = UTCTime
-
-
-------------------------------------------------------------------------------
-instance PGRep Value (Column PGJsonb) where
-    type PG Value = Column PGJsonb
-    type UnPG (Column PGJsonb) = Value
-
-
-------------------------------------------------------------------------------
-type family PGScalar (a :: *) :: *
-type instance PGScalar Bool = PGBool
-type instance PGScalar ByteString = PGBytea
-type instance PGScalar (CI Text) = PGCitext
-type instance PGScalar Day = PGDate
-type instance PGScalar Double = PGFloat8
-type instance PGScalar Float = PGFloat4
-type instance PGScalar Int16 = PGInt2
-type instance PGScalar Int32 = PGInt4
-type instance PGScalar Int64 = PGInt8
-type instance PGScalar LocalTime = PGTimestamp
-type instance PGScalar Text = PGText
-type instance PGScalar TimeOfDay = PGTime
-type instance PGScalar UTCTime = PGTimestamptz
-type instance PGScalar UUID = PGUuid
-type instance PGScalar Value = PGJsonb
-
-
-------------------------------------------------------------------------------
-type family UnPGScalar (a :: *) :: *
-type instance UnPGScalar PGBool = Bool
-type instance UnPGScalar PGBytea = ByteString
-type instance UnPGScalar PGCitext = (CI Text)
-type instance UnPGScalar PGDate = Day
-type instance UnPGScalar PGFloat8 = Double
-type instance UnPGScalar PGFloat4 = Float
-type instance UnPGScalar PGInt2 = Int16
-type instance UnPGScalar PGInt4 = Int32
-type instance UnPGScalar PGInt8 = Int64
-type instance UnPGScalar PGTimestamp = LocalTime
-type instance UnPGScalar PGText = Text
-type instance UnPGScalar PGTime = TimeOfDay
-type instance UnPGScalar PGTimestamptz = UTCTime
-type instance UnPGScalar PGUuid = UUID
-type instance UnPGScalar PGJsonb = Value
+type family UnPG a :: * where
+    UnPG () = ()
+    UnPG (a, b) = (UnPG a, UnPG b)
+    UnPG (a, b, c) = (UnPG a, UnPG b, UnPG c)
+    UnPG (a, b, c, d) = (UnPG a, UnPG b, UnPG c, UnPG d)
+    UnPG (a, b, c, d, e) = (UnPG a, UnPG b, UnPG c, UnPG d, UnPG e)
+    UnPG (a, b, c, d, e, f) = (UnPG a, UnPG b, UnPG c, UnPG d, UnPG e, UnPG f)
+    UnPG (a, b, c, d, e, f, g) =
+        (UnPG a, UnPG b, UnPG c, UnPG d, UnPG e, UnPG f, UnPG g)
+    UnPG (a, b, c, d, e, f, g, h) =
+        (UnPG a, UnPG b, UnPG c, UnPG d, UnPG e, UnPG f, UnPG g, UnPG h)
+    UnPG (a, b, c, d, e, f, g, h, i) =
+        ( UnPG a, UnPG b, UnPG c, UnPG d, UnPG e, UnPG f, UnPG g, UnPG h
+        , UnPG i
+        )
+    UnPG (a, b, c, d, e, f, g, h, i, j) =
+        ( UnPG a, UnPG b, UnPG c, UnPG d, UnPG e, UnPG f, UnPG g, UnPG h
+        , UnPG i, UnPG j
+        )
+    UnPG (Product g Nil) = Product g Nil
+    UnPG (Tuple (Cons a as)) = Tuple (Cons (UnPG a) (UnPGMap as))
+    UnPG (Record (Cons (Pair s a) as)) =
+        Record (Cons (Pair s (UnPG a)) (UnPGMapSnd as))
+    UnPG (Option a) = Option (UnPG a)
+    UnPG (Const (Column (Nullable a)) b) = Maybe (Const (UnPGScalar a) b)
+    UnPG (Identity (Column (Nullable a))) = Maybe (Identity (UnPGScalar a))
+    UnPG (Tagged s (Column (Nullable a))) = Maybe (Tagged s (UnPGScalar a))
+    UnPG (Field (Pair s (Column (Nullable a)))) =
+        Maybe (Field (Pair s (UnPGScalar a)))
+    UnPG (Const a b) = Const (UnPG a) b
+    UnPG (Identity a) = Identity (UnPG a)
+    UnPG (Tagged s a) = Tagged s (UnPG a)
+    UnPG (Field (Pair s a)) = Field (Pair s (UnPG a))
+    UnPG (Column (PGArray p)) = [UnPGScalar p]
+    UnPG (Column (Nullable a)) = Maybe (UnPGScalar a)
+    UnPG (Column a) = UnPGScalar a
 
 
 ------------------------------------------------------------------------------
 type family PGMap (as :: KList (*)) :: KList (*)
-#ifdef ClosedTypeFamilies
   where
-#endif
-#ifndef ClosedTypeFamilies
-type instance
-#endif
     PGMap Nil = Nil
-#ifndef ClosedTypeFamilies
-type instance
-#endif
     PGMap (Cons a as) = Cons (PG a) (PGMap as)
 
 
 ------------------------------------------------------------------------------
 type family PGMapSnd (as :: KList (KPair (KPoly1, *)))
     :: KList (KPair (KPoly1, *))
-#ifdef ClosedTypeFamilies
   where
-#endif
-#ifndef ClosedTypeFamilies
-type instance
-#endif
     PGMapSnd Nil = Nil
-#ifndef ClosedTypeFamilies
-type instance
-#endif
     PGMapSnd (Cons (Pair s a) as) = Cons (Pair s (PG a)) (PGMapSnd as)
 
 
 ------------------------------------------------------------------------------
-type family UnPGMap (as :: KList (*)) :: KList (*)
-#ifdef ClosedTypeFamilies
-  where
-#endif
-#ifndef ClosedTypeFamilies
-type instance
-#endif
+type family UnPGMap (as :: KList (*)) :: KList (*) where
     UnPGMap Nil = Nil
-#ifndef ClosedTypeFamilies
-type instance
-#endif
     UnPGMap (Cons a as) = Cons (UnPG a) (UnPGMap as)
 
 
 ------------------------------------------------------------------------------
 type family UnPGMapSnd (as :: KList (KPair (KPoly1, *)))
     :: KList (KPair (KPoly1, *))
-#ifdef ClosedTypeFamilies
   where
-#endif
-#ifndef ClosedTypeFamilies
-type instance
-#endif
     UnPGMapSnd Nil = Nil
-#ifndef ClosedTypeFamilies
-type instance
-#endif
     UnPGMapSnd (Cons (Pair s a) as) = Cons (Pair s (UnPG a)) (UnPGMapSnd as)
+
+
+------------------------------------------------------------------------------
+class (PG a ~ p, UnPG p ~ a) => PGRep a p | a -> p , p -> a
+instance (PG a ~ p, UnPG p ~ a) => PGRep a p
 
 
 ------------------------------------------------------------------------------
@@ -620,16 +380,64 @@ instance Required a => Required (Tagged s a) where
 
 
 ------------------------------------------------------------------------------
+newtype Option a = Option (Maybe a) deriving
+    ( Functor, Foldable, Traversable, Applicative, Monad, Alternative
+    , MonadPlus, Eq, Ord, Read, Show, Typeable, Generic, Generic1, Monoid
+#if MIN_VERSION_base(4, 9, 0)
+    , Semigroup
+#endif
+    )
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p (Maybe a) (Maybe b)) =>
+    Default p (Option a) (Option b)
+  where
+    def = dimap (\(Option a) -> a) Option def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p (Maybe a) (Maybe b)) =>
+    Default p (Maybe (Const a s)) (Maybe (Const b s))
+  where
+    def = dimap (fmap (\(Const a) -> a)) (fmap Const) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p (Maybe a) (Maybe b)) =>
+    Default p (Maybe (Identity a)) (Maybe (Identity b))
+  where
+    def = dimap (fmap (\(Identity a) -> a)) (fmap Identity) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p (Maybe a) (Maybe b)) =>
+    Default p (Maybe (Tagged s a)) (Maybe (Tagged s b))
+  where
+    def = dimap (fmap (\(Tagged a) -> a)) (fmap Tagged) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p (Maybe a) (Maybe b), KnownSymbol s) =>
+    Default p (Maybe (Field (Pair s a))) (Maybe (Field (Pair s b)))
+  where
+    def = dimap (fmap unlabel) (fmap (Labeled . Identity)) def
+      where
+        unlabel :: Field (Pair s a) -> a
+        unlabel (Labeled (Identity a)) = a
+
+
+------------------------------------------------------------------------------
 class Optional a where
     optional'
         :: KnownSymbol s
         => String
-        -> Field (Pair s (TableProperties (Maybe a) a))
+        -> Field (Pair s (TableProperties (Option a) a))
 
 
 ------------------------------------------------------------------------------
 instance Optional (Column a) where
-    optional' = Labeled . Identity . O.optional
+    optional' = Labeled . Identity . lmap (\(Option a) -> a) . O.optional
 
 
 ------------------------------------------------------------------------------
@@ -661,7 +469,7 @@ required = required'
 optional
     :: forall s a. (KnownSymbol s, Optional a)
     => String
-    -> Field (Pair s (TableProperties (Maybe a) a))
+    -> Field (Pair s (TableProperties (Option a) a))
 optional = optional'
 
 
@@ -694,8 +502,8 @@ instance (KnownSymbol s, MakeTableProperties abs as bs, Required a) =>
 ------------------------------------------------------------------------------
 instance (KnownSymbol s, MakeTableProperties abs as bs, Optional a) =>
     MakeTableProperties
-        (Cons (Pair s (TableProperties (Maybe a) a)) abs)
-        (Cons (Pair s (Maybe a)) as)
+        (Cons (Pair s (TableProperties (Option a) a)) abs)
+        (Cons (Pair s (Option a)) as)
         (Cons (Pair s a) bs)
   where
     properties = Cons (optional (symbolVal (Proxy :: Proxy s))) properties
@@ -1038,12 +846,13 @@ instance (Default QueryRunner p a, PGRep a p) => Out p a
 
 
 ------------------------------------------------------------------------------
-query :: (In a a', Out b' b) => QueryArr a' b' -> a -> Transaction [b]
+query :: forall b a b' a'. (In a a', Out b' b)
+    => QueryArr a' b' -> a -> Transaction [b]
 query q a = T.query (lmap (\_ -> pg a) q)
 
 
 ------------------------------------------------------------------------------
-queryFirst :: (In a a', Out b' b)
+queryFirst :: forall b a b' a'. (In a a', Out b' b)
     => QueryArr a' b' -> a -> Transaction (Maybe b)
 queryFirst q a = T.queryFirst (lmap (\_ -> pg a) q)
 
