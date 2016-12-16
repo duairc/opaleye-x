@@ -12,20 +12,10 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
-
-#include "kinds.h"
-
-#ifdef SafeHaskell
-{-# LANGUAGE Trustworthy #-}
-#endif
-
-#ifdef DataPolyKinds
-{-# LANGUAGE DataKinds #-}
-{-# LANGUAGE PolyKinds #-}
-#endif
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
@@ -37,7 +27,6 @@ module Opaleye.StreamBeneathTheHills
 
     , PGScalar
     , UnPGScalar
-
 
     , Required
     , required
@@ -98,8 +87,10 @@ import           Data.Traversable (Traversable)
 import           Data.Semigroup (Semigroup)
 #endif
 import           Data.Monoid ((<>))
+import           Data.Proxy (Proxy (Proxy))
 import           Data.Typeable (Typeable)
 import           GHC.Generics (Generic, Generic1)
+import           GHC.TypeLits (KnownSymbol, Symbol, symbolVal)
 
 
 -- bytestring ----------------------------------------------------------------
@@ -179,19 +170,6 @@ import           Data.Time.Clock (UTCTime)
 import           Data.Time.LocalTime (LocalTime, TimeOfDay)
 
 
--- types ---------------------------------------------------------------------
-import           GHC.TypeLits.Compat
-                     ( KnownSymbol
-#ifdef DataPolyKinds
-                     , Symbol
-#endif
-                     , symbolVal
-                     )
-import           Type.List (Cons, Nil)
-import           Type.Meta (Proxy (Proxy))
-import           Type.Tuple.Pair (Pair)
-
-
 -- uuid-types ----------------------------------------------------------------
 import           Data.UUID.Types (UUID)
 
@@ -249,19 +227,18 @@ type family PG a :: * where
         (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i)
     PG (a, b, c, d, e, f, g, h, i, j) =
         (PG a, PG b, PG c, PG d, PG e, PG f, PG g, PG h, PG i, PG j)
-    PG (Product g Nil) = Product g Nil
-    PG (Tuple (Cons a as)) = Tuple (Cons (PG a) (PGMap as))
-    PG (Record (Cons (Pair s a) as)) =
-        Record (Cons (Pair s (PG a)) (PGMapSnd as))
+    PG (Product g '[]) = Product g '[]
+    PG (Tuple (a ': as)) = Tuple (PG a ': PGMap as)
+    PG (Record ('(s, a) ': as)) = Record ('(s, PG a) ': PGMapSnd as)
     PG (Option a) = Option (PG a)
     PG (Const a b) = Const (PG a) b
     PG (Identity a) = Identity (PG a)
     PG (Tagged s a) = Tagged s (PG a)
-    PG (Field (Pair s a)) = Field (Pair s (PG a))
+    PG (Field '(s, a)) = Field '(s, PG a)
     PG (Maybe (Const a b)) = Const (PG (Maybe a)) b
     PG (Maybe (Identity a)) = Identity (PG (Maybe a))
     PG (Maybe (Tagged s a)) = Tagged s (PG (Maybe a))
-    PG (Maybe (Field (Pair s a))) = Field (Pair s (PG (Maybe a)))
+    PG (Maybe (Field '(s, a))) = Field '(s, PG (Maybe a))
     PG [a] = Column (PGArray (PGScalar a))
     PG (Maybe a) = Column (Nullable (PGScalar a))
     PG a = Column (PGScalar a)
@@ -287,52 +264,45 @@ type family UnPG a :: * where
         ( UnPG a, UnPG b, UnPG c, UnPG d, UnPG e, UnPG f, UnPG g, UnPG h
         , UnPG i, UnPG j
         )
-    UnPG (Product g Nil) = Product g Nil
-    UnPG (Tuple (Cons a as)) = Tuple (Cons (UnPG a) (UnPGMap as))
-    UnPG (Record (Cons (Pair s a) as)) =
-        Record (Cons (Pair s (UnPG a)) (UnPGMapSnd as))
+    UnPG (Product g '[]) = Product g '[]
+    UnPG (Tuple (a ': as)) = Tuple (UnPG a ': UnPGMap as)
+    UnPG (Record ('(s, a) ': as)) = Record ('(s, UnPG a) ': UnPGMapSnd as)
     UnPG (Option a) = Option (UnPG a)
     UnPG (Const (Column (Nullable a)) b) = Maybe (Const (UnPGScalar a) b)
     UnPG (Identity (Column (Nullable a))) = Maybe (Identity (UnPGScalar a))
     UnPG (Tagged s (Column (Nullable a))) = Maybe (Tagged s (UnPGScalar a))
-    UnPG (Field (Pair s (Column (Nullable a)))) =
-        Maybe (Field (Pair s (UnPGScalar a)))
+    UnPG (Field '(s, Column (Nullable a))) = Maybe (Field '(s, UnPGScalar a))
     UnPG (Const a b) = Const (UnPG a) b
     UnPG (Identity a) = Identity (UnPG a)
     UnPG (Tagged s a) = Tagged s (UnPG a)
-    UnPG (Field (Pair s a)) = Field (Pair s (UnPG a))
+    UnPG (Field '(s, a)) = Field '(s, UnPG a)
     UnPG (Column (PGArray p)) = [UnPGScalar p]
     UnPG (Column (Nullable a)) = Maybe (UnPGScalar a)
     UnPG (Column a) = UnPGScalar a
 
 
 ------------------------------------------------------------------------------
-type family PGMap (as :: KList (*)) :: KList (*)
-  where
-    PGMap Nil = Nil
-    PGMap (Cons a as) = Cons (PG a) (PGMap as)
+type family PGMap (as :: [*]) :: [*] where
+    PGMap '[] = '[]
+    PGMap (a ': as) = PG a ': PGMap as
 
 
 ------------------------------------------------------------------------------
-type family PGMapSnd (as :: KList (KPair (KPoly1, *)))
-    :: KList (KPair (KPoly1, *))
-  where
-    PGMapSnd Nil = Nil
-    PGMapSnd (Cons (Pair s a) as) = Cons (Pair s (PG a)) (PGMapSnd as)
+type family PGMapSnd (as :: [(k, *)]) :: [(k, *)] where
+    PGMapSnd '[] = '[]
+    PGMapSnd ('(s, a) ': as) = '(s, PG a) ': PGMapSnd as
 
 
 ------------------------------------------------------------------------------
-type family UnPGMap (as :: KList (*)) :: KList (*) where
-    UnPGMap Nil = Nil
-    UnPGMap (Cons a as) = Cons (UnPG a) (UnPGMap as)
+type family UnPGMap (as :: [*]) :: [*] where
+    UnPGMap '[] = '[]
+    UnPGMap (a ': as) = UnPG a ': UnPGMap as
 
 
 ------------------------------------------------------------------------------
-type family UnPGMapSnd (as :: KList (KPair (KPoly1, *)))
-    :: KList (KPair (KPoly1, *))
-  where
-    UnPGMapSnd Nil = Nil
-    UnPGMapSnd (Cons (Pair s a) as) = Cons (Pair s (UnPG a)) (UnPGMapSnd as)
+type family UnPGMapSnd (as :: [(k, *)]) :: [(k, *)] where
+    UnPGMapSnd '[] = '[]
+    UnPGMapSnd ('(s, a) ': as) = '(s, UnPG a) ': UnPGMapSnd as
 
 
 ------------------------------------------------------------------------------
@@ -346,7 +316,7 @@ pg = constant
 
 
 ------------------------------------------------------------------------------
-lfmap :: (a -> b) -> Field (Pair s a) -> Field (Pair s b)
+lfmap :: (a -> b) -> Field '(s, a) -> Field '(s, b)
 lfmap f (Labeled (Identity a)) = Labeled (Identity (f a))
 {-# INLINE lfmap #-}
 
@@ -356,7 +326,7 @@ class Required a where
     required'
         :: KnownSymbol s
         => String
-        -> Field (Pair s (TableProperties a a))
+        -> Field '(s, TableProperties a a)
 
 
 ------------------------------------------------------------------------------
@@ -419,11 +389,11 @@ instance (Profunctor p, Default p (Maybe a) (Maybe b)) =>
 
 ------------------------------------------------------------------------------
 instance (Profunctor p, Default p (Maybe a) (Maybe b), KnownSymbol s) =>
-    Default p (Maybe (Field (Pair s a))) (Maybe (Field (Pair s b)))
+    Default p (Maybe (Field '(s, a))) (Maybe (Field '(s, b)))
   where
     def = dimap (fmap unlabel) (fmap (Labeled . Identity)) def
       where
-        unlabel :: Field (Pair s a) -> a
+        unlabel :: Field '(s, a) -> a
         unlabel (Labeled (Identity a)) = a
 
 
@@ -432,7 +402,7 @@ class Optional a where
     optional'
         :: KnownSymbol s
         => String
-        -> Field (Pair s (TableProperties (Option a) a))
+        -> Field '(s, TableProperties (Option a) a)
 
 
 ------------------------------------------------------------------------------
@@ -461,7 +431,7 @@ instance Optional a => Optional (Tagged s a) where
 required
     :: forall s a. (KnownSymbol s, Required a)
     => String
-    -> Field (Pair s (TableProperties a a))
+    -> Field '(s, TableProperties a a)
 required = required'
 
 
@@ -469,15 +439,15 @@ required = required'
 optional
     :: forall s a. (KnownSymbol s, Optional a)
     => String
-    -> Field (Pair s (TableProperties (Option a) a))
+    -> Field '(s, TableProperties (Option a) a)
 optional = optional'
 
 
 ------------------------------------------------------------------------------
 class MakeTableProperties
-    (abs :: KList (KPair (KString, *)))
-    (as :: KList (KPair (KString, *)))
-    (bs :: KList (KPair (KString, *)))
+    (abs :: [(Symbol, *)])
+    (as :: [(Symbol, *)])
+    (bs :: [(Symbol, *)])
         | abs -> as
         , abs -> bs
   where
@@ -485,16 +455,16 @@ class MakeTableProperties
 
 
 ------------------------------------------------------------------------------
-instance MakeTableProperties Nil Nil Nil where
+instance MakeTableProperties '[] '[] '[] where
     properties = Nil
 
 
 ------------------------------------------------------------------------------
 instance (KnownSymbol s, MakeTableProperties abs as bs, Required a) =>
     MakeTableProperties
-        (Cons (Pair s (TableProperties a a)) abs)
-        (Cons (Pair s a) as)
-        (Cons (Pair s a) bs)
+        ('(s, TableProperties a a) ': abs)
+        ('(s, a) ': as)
+        ('(s, a) ': bs)
   where
     properties = Cons (required (symbolVal (Proxy :: Proxy s))) properties
 
@@ -502,9 +472,9 @@ instance (KnownSymbol s, MakeTableProperties abs as bs, Required a) =>
 ------------------------------------------------------------------------------
 instance (KnownSymbol s, MakeTableProperties abs as bs, Optional a) =>
     MakeTableProperties
-        (Cons (Pair s (TableProperties (Option a) a)) abs)
-        (Cons (Pair s (Option a)) as)
-        (Cons (Pair s a) bs)
+        ('(s, TableProperties (Option a) a) ': abs)
+        ('(s, Option a) ': as)
+        ('(s, a) ': bs)
   where
     properties = Cons (optional (symbolVal (Proxy :: Proxy s))) properties
 
@@ -526,18 +496,18 @@ class LiftRecord r w where
 
 
 ------------------------------------------------------------------------------
-instance LiftRecord Nil Nil where
+instance LiftRecord '[] '[] where
     liftRecord Nil = Nil
 
 
 ------------------------------------------------------------------------------
-instance LiftRecord as bs => LiftRecord (Cons a as) (Cons a bs) where
+instance LiftRecord as bs => LiftRecord (a ': as) (a ': bs) where
     liftRecord (Cons a as) = Cons a (liftRecord as)
 
 
 ------------------------------------------------------------------------------
 instance (Applicative f, LiftRecord as bs) =>
-    LiftRecord (Cons (Pair s a) as) (Cons (Pair s (f a)) bs)
+    LiftRecord ('(s, a) ': as) ('(s, f a) ': bs)
   where
     liftRecord (Cons (Labeled a) as) =
         Cons (Labeled (pure <$> a)) (liftRecord as)
@@ -569,10 +539,10 @@ instance Orderable a => Orderable (Tagged s a) where
 
 
 ------------------------------------------------------------------------------
-instance Orderable (f a) => Orderable (Labeled f (Pair s a)) where
+instance Orderable (f a) => Orderable (Labeled f '(s, a)) where
     ordering = contramap unlabel ordering
       where
-        unlabel :: Labeled f (Pair s a) -> f a
+        unlabel :: Labeled f '(s, a) -> f a
         unlabel (Labeled a) = a
 
 
@@ -814,13 +784,13 @@ instance
 
 
 ------------------------------------------------------------------------------
-instance Orderable (Product g Nil) where
+instance Orderable (Product g '[]) where
     ordering = mempty
 
 
 ------------------------------------------------------------------------------
 instance (Orderable (g a), Orderable (Product g as)) =>
-    Orderable (Product g (Cons a as))
+    Orderable (Product g (a ': as))
   where
     ordering = contramap (\(Cons a _) -> a) (ordering :: Order (g a)) <>
         contramap (\(Cons _ as) -> as) (ordering :: Order (Product g as))
