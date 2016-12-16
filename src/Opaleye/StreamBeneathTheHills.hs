@@ -32,14 +32,17 @@ module Opaleye.StreamBeneathTheHills
     , PGScalar
     , UnPGScalar
 
-    , table
 
     , Required
     , required
     , Optional
     , optional
+
     , MakeTableProperties
     , properties
+
+    , table
+
     , Orderable
     , ordering
     , ordered
@@ -56,6 +59,9 @@ module Opaleye.StreamBeneathTheHills
     , update
     , updateReturning
     , updateReturningFirst
+
+    , LiftRecord
+    , liftRecord
     )
 where
 
@@ -707,6 +713,29 @@ table s = Table s $ pRecord properties
 
 
 ------------------------------------------------------------------------------
+class LiftRecord r w where
+    liftRecord :: Functor f => Product (Labeled f) r -> Product (Labeled f) w
+
+
+------------------------------------------------------------------------------
+instance LiftRecord Nil Nil where
+    liftRecord Nil = Nil
+
+
+------------------------------------------------------------------------------
+instance LiftRecord as bs => LiftRecord (Cons a as) (Cons a bs) where
+    liftRecord (Cons a as) = Cons a (liftRecord as)
+
+
+------------------------------------------------------------------------------
+instance (Applicative f, LiftRecord as bs) =>
+    LiftRecord (Cons (Pair s a) as) (Cons (Pair s (f a)) bs)
+  where
+    liftRecord (Cons (Labeled a) as) =
+        Cons (Labeled (pure <$> a)) (liftRecord as)
+
+
+------------------------------------------------------------------------------
 class Orderable a where
     ordering :: Order a
 
@@ -1048,25 +1077,29 @@ insertReturningFirst t f = T.insertReturningFirst t f . pg
 
 
 ------------------------------------------------------------------------------
-update :: Table w r -> (r -> w) -> (r -> PG Bool) -> Transaction Int64
-update = T.update
+update :: LiftRecord r w
+    => Table (Record w) (Record r)
+    -> (Record w -> Record w)
+    -> (Record r -> PG Bool)
+    -> Transaction Int64
+update t f = T.update t (f . liftRecord)
 
 
 ------------------------------------------------------------------------------
-updateReturning :: Default QueryRunner r' a
-    => Table w r
-    -> (r -> w)
-    -> (r -> PG Bool)
-    -> (r -> r')
+updateReturning :: (Default QueryRunner r' a, LiftRecord r w)
+    => Table (Record w) (Record r)
+    -> (Record w -> Record w)
+    -> (Record r -> PG Bool)
+    -> (Record r -> r')
     -> Transaction [a]
-updateReturning = T.updateReturning
+updateReturning t f = T.updateReturning t (f . liftRecord)
 
 
 ------------------------------------------------------------------------------
-updateReturningFirst :: Default QueryRunner r' a
-    => Table w r
-    -> (r -> w)
-    -> (r -> PG Bool)
-    -> (r -> r')
+updateReturningFirst :: (Default QueryRunner r' a, LiftRecord r w)
+    => Table (Record w) (Record r)
+    -> (Record w -> Record w)
+    -> (Record r -> PG Bool)
+    -> (Record r -> r')
     -> Transaction (Maybe a)
-updateReturningFirst = T.updateReturningFirst
+updateReturningFirst t f = T.updateReturningFirst t (f . liftRecord)
