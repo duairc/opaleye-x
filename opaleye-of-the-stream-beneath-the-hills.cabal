@@ -19,26 +19,30 @@ library
   hs-source-dirs:
     src
 
-  include-dirs:
-    include
-
   exposed-modules:
     Opaleye.StreamBeneathTheHills
+    Opaleye.StreamBeneathTheHills.Option
+    Opaleye.StreamBeneathTheHills.Order
+    Opaleye.StreamBeneathTheHills.Table
+    Opaleye.StreamBeneathTheHills.TF
+    Opaleye.StreamBeneathTheHills.Transaction
 
   build-depends:
     aeson >= 0.1 && < 1.2,
     anonymous-data >= 0.1 && < 0.2,
     anonymous-data-product-profunctors >= 0.1 && < 0.2,
-    base >= 4.8 && < 5,
+    base >= 4.7 && < 5,
     bytestring >= 0.10 && < 0.11,
     case-insensitive >= 0.1 && < 1.3,
     contravariant >= 0.1 && < 2,
+    layers >= 1.0.0 && < 2,
     opaleye >= 0.4 && < 0.6,
-    opaleye-trans >= 0.3 && < 0.4,
+    postgresql-simple >= 0.0 && < 0.6,
     product-profunctors >= 0.5 && < 0.8,
     profunctors >= 3.1.1 && < 6,
     tagged >= 0.0 && < 1,
     text >= 0.1 && < 2,
+    transformers >= 0.2 && < 0.6,
     time >= 1 && < 2,
     uuid-types >= 1 && < 2
 
