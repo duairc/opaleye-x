@@ -10,6 +10,13 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
+#if __GLASGOW_HASKELL__ >= 710
+#define __OVERLAPPABLE__ {-# OVERLAPPABLE #-}
+#else
+#define __OVERLAPPABLE__
+{-# LANGUAGE OverlappingInstances #-}
+#endif
+
 module Opaleye.StreamBeneathTheHills.TF
     ( PGScalar
     , UnPGScalar
@@ -20,6 +27,11 @@ module Opaleye.StreamBeneathTheHills.TF
     , ToPG
     , FromPG
     , pg
+
+    , PGMap
+    , UnPGMap
+    , PGMapSnd
+    , UnPGMapSnd
     )
 where
 
