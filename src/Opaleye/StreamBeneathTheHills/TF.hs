@@ -109,41 +109,41 @@ import           Data.UUID.Types (UUID)
 
 
 ------------------------------------------------------------------------------
-type family PGScalar (a :: *) :: * where
-    PGScalar Bool = PGBool
-    PGScalar ByteString = PGBytea
-    PGScalar (CI Text) = PGCitext
-    PGScalar Day = PGDate
-    PGScalar Double = PGFloat8
-    PGScalar Float = PGFloat4
-    PGScalar Int16 = PGInt2
-    PGScalar Int32 = PGInt4
-    PGScalar Int64 = PGInt8
-    PGScalar LocalTime = PGTimestamp
-    PGScalar Text = PGText
-    PGScalar TimeOfDay = PGTime
-    PGScalar UTCTime = PGTimestamptz
-    PGScalar UUID = PGUuid
-    PGScalar Value = PGJsonb
+type family PGScalar (a :: *) :: *
+type instance PGScalar Bool = PGBool
+type instance PGScalar ByteString = PGBytea
+type instance PGScalar (CI Text) = PGCitext
+type instance PGScalar Day = PGDate
+type instance PGScalar Double = PGFloat8
+type instance PGScalar Float = PGFloat4
+type instance PGScalar Int16 = PGInt2
+type instance PGScalar Int32 = PGInt4
+type instance PGScalar Int64 = PGInt8
+type instance PGScalar LocalTime = PGTimestamp
+type instance PGScalar Text = PGText
+type instance PGScalar TimeOfDay = PGTime
+type instance PGScalar UTCTime = PGTimestamptz
+type instance PGScalar UUID = PGUuid
+type instance PGScalar Value = PGJsonb
 
 
 ------------------------------------------------------------------------------
-type family UnPGScalar (a :: *) :: * where
-    UnPGScalar PGBool = Bool
-    UnPGScalar PGBytea = ByteString
-    UnPGScalar PGCitext = (CI Text)
-    UnPGScalar PGDate = Day
-    UnPGScalar PGFloat8 = Double
-    UnPGScalar PGFloat4 = Float
-    UnPGScalar PGInt2 = Int16
-    UnPGScalar PGInt4 = Int32
-    UnPGScalar PGInt8 = Int64
-    UnPGScalar PGTimestamp = LocalTime
-    UnPGScalar PGText = Text
-    UnPGScalar PGTime = TimeOfDay
-    UnPGScalar PGTimestamptz = UTCTime
-    UnPGScalar PGUuid = UUID
-    UnPGScalar PGJsonb = Value
+type family UnPGScalar (a :: *) :: *
+type instance UnPGScalar PGBool = Bool
+type instance UnPGScalar PGBytea = ByteString
+type instance UnPGScalar PGCitext = (CI Text)
+type instance UnPGScalar PGDate = Day
+type instance UnPGScalar PGFloat8 = Double
+type instance UnPGScalar PGFloat4 = Float
+type instance UnPGScalar PGInt2 = Int16
+type instance UnPGScalar PGInt4 = Int32
+type instance UnPGScalar PGInt8 = Int64
+type instance UnPGScalar PGTimestamp = LocalTime
+type instance UnPGScalar PGText = Text
+type instance UnPGScalar PGTime = TimeOfDay
+type instance UnPGScalar PGTimestamptz = UTCTime
+type instance UnPGScalar PGUuid = UUID
+type instance UnPGScalar PGJsonb = Value
 
 
 ------------------------------------------------------------------------------
