@@ -173,8 +173,12 @@ type family PG a :: * where
     PG (Maybe (Identity a)) = Identity (PG (Maybe a))
     PG (Maybe (Tagged s a)) = Tagged s (PG (Maybe a))
     PG (Maybe (Field '(s, a))) = Field '(s, PG (Maybe a))
-    PG [a] = Column (PGArray (PGScalar a))
+    PG [Const a b] = Const (PG [a]) b
+    PG [Identity a] = Identity (PG [a])
+    PG [Tagged s a] = Tagged s (PG [a])
+    PG [Field '(s, a)] = Field '(s, PG [a])
     PG (Maybe a) = Column (Nullable (PGScalar a))
+    PG [a] = Column (PGArray (PGScalar a))
     PG a = Column (PGScalar a)
 
 
@@ -206,6 +210,10 @@ type family UnPG a :: * where
     UnPG (Identity (Column (Nullable a))) = Maybe (Identity (UnPGScalar a))
     UnPG (Tagged s (Column (Nullable a))) = Maybe (Tagged s (UnPGScalar a))
     UnPG (Field '(s, Column (Nullable a))) = Maybe (Field '(s, UnPGScalar a))
+    UnPG (Const (Column (PGArray a)) b) = [Const (UnPGScalar a) b]
+    UnPG (Identity (Column (PGArray a))) = [Identity (UnPGScalar a)]
+    UnPG (Tagged s (Column (PGArray a))) = [Tagged s (UnPGScalar a)]
+    UnPG (Field '(s, Column (PGArray a))) = [Field '(s, UnPGScalar a)]
     UnPG (Const a b) = Const (UnPG a) b
     UnPG (Identity a) = Identity (UnPG a)
     UnPG (Tagged s a) = Tagged s (UnPG a)

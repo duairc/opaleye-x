@@ -47,6 +47,7 @@ import           Prelude hiding (null)
 
 -- opaleye -------------------------------------------------------------------
 import           Opaleye.Column (Column, Nullable, null, toNullable)
+import           Opaleye.PGTypes (IsSqlType, PGArray, pgArray)
 
 
 -- profunctors ---------------------------------------------------------------
@@ -165,6 +166,95 @@ instance (Profunctor p, Default p (Maybe a) (Maybe b)) =>
 ------------------------------------------------------------------------------
 instance (Profunctor p, Default p (Maybe a) (Maybe b), KnownSymbol s) =>
     Default p (Maybe (Field '(s, a))) (Maybe (Field '(s, b)))
+  where
+    def = dimap (fmap unlabel) (fmap (Labeled . Identity)) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p (Column (PGArray a)) [b], IsSqlType a) =>
+    Default p [Column a] [b]
+  where
+    def = lmap (pgArray id) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p a [b]) => Default p (Const a s) [Const b s]
+  where
+    def = dimap (\(Const a) -> a) (fmap Const) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p a [b]) =>
+    Default p (Identity a) [Identity b]
+  where
+    def = dimap (\(Identity a) -> a) (fmap Identity) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p a [b]) =>
+    Default p (Tagged s a) [Tagged s b]
+  where
+    def = dimap (\(Tagged a) -> a) (fmap Tagged) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p a [b], KnownSymbol s) =>
+    Default p (Field '(s, a)) [Field '(s, b)]
+  where
+    def = dimap unlabel (fmap (Labeled . Identity)) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p [a] b) => Default p [Const a s] (Const b s)
+  where
+    def = dimap (fmap (\(Const a) -> a)) Const def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p [a] b) =>
+    Default p [Identity a] (Identity b)
+  where
+    def = dimap (fmap (\(Identity a) -> a)) Identity def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p [a] b) =>
+    Default p [Tagged s a] (Tagged s b)
+  where
+    def = dimap (fmap (\(Tagged a) -> a)) Tagged def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p [a] b, KnownSymbol s) =>
+    Default p [Field '(s, a)] (Field '(s, b))
+  where
+    def = dimap (fmap unlabel) (Labeled . Identity) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p [a] [b]) =>
+    Default p [Const a s] [Const b s]
+  where
+    def = dimap (fmap (\(Const a) -> a)) (fmap Const) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p [a] [b]) =>
+    Default p [Identity a] [Identity b]
+  where
+    def = dimap (fmap (\(Identity a) -> a)) (fmap Identity) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p [a] [b]) =>
+    Default p [Tagged s a] [Tagged s b]
+  where
+    def = dimap (fmap (\(Tagged a) -> a)) (fmap Tagged) def
+
+
+------------------------------------------------------------------------------
+instance (Profunctor p, Default p [a] [b], KnownSymbol s) =>
+    Default p [Field '(s, a)] [Field '(s, b)]
   where
     def = dimap (fmap unlabel) (fmap (Labeled . Identity)) def
 
