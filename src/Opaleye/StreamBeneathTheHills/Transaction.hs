@@ -26,6 +26,8 @@ module Opaleye.StreamBeneathTheHills.Transaction
     , updateReturning
 
     , delete
+
+    , getCurrentTime
     )
 where
 
@@ -34,20 +36,42 @@ import           Data.Anonymous.Product (Record)
 
 
 -- base ----------------------------------------------------------------------
+import           Control.Applicative (Alternative, (<|>), empty)
 #if !MIN_VERSION_base(4, 8, 0)
 import           Control.Applicative (Applicative, (<$>), pure)
 #endif
+import           Control.Exception
+                     ( Exception
+                     , PatternMatchFail (PatternMatchFail)
+                     , SomeException
+                     )
+import           Control.Monad (MonadPlus, mzero, mplus)
+#if MIN_VERSION_base(4, 9, 0)
+import           Control.Monad.Fail (MonadFail)
+import qualified Control.Monad.Fail as F (fail)
+#endif
 import           Control.Monad.Fix (MonadFix)
 import           Data.Maybe (listToMaybe)
+#if !MIN_VERSION_base(4, 8, 0)
+import           Data.Monoid (Monoid, mappend, mempty)
+#endif
 import           Data.Int (Int64)
+#if MIN_VERSION_base(4, 9, 0)
+import           Data.Semigroup (Semigroup, (<>))
+#endif
 import           Data.Typeable (Typeable)
 import           GHC.Generics (Generic, Generic1)
 
 
 -- layers --------------------------------------------------------------------
+import           Control.Monad.Lift (lift)
 import           Control.Monad.Lift.Base (MonadBase)
 import           Control.Monad.Lift.IO (MonadIO, liftIO)
+import           Monad.Abort (MonadAbort)
+import           Monad.Catch (catch, try)
 import           Monad.Reader (MonadReader, ask)
+import           Monad.Recover (MonadRecover, recover)
+import           Monad.Throw (throw)
 
 
 -- opaleye -------------------------------------------------------------------
@@ -59,12 +83,12 @@ import           Opaleye.Manipulation
                      , runDelete
                      )
 import           Opaleye.Order (limit)
-import           Opaleye.QueryArr (Query)
+import           Opaleye.QueryArr (QueryArr)
 import           Opaleye.RunQuery (runQuery)
 
 
 -- opaleye-of-the-stream-beneath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.TF (PG, FromPG, pg)
+import           Opaleye.StreamBeneathTheHills.TF (PG, ToPG, FromPG, pg)
 import           Opaleye.StreamBeneathTheHills.Table
                      ( Table
                      , TableArgs
@@ -73,23 +97,87 @@ import           Opaleye.StreamBeneathTheHills.Table
 
 
 -- postgresql-simple ---------------------------------------------------------
-import           Database.PostgreSQL.Simple (Connection, withTransaction)
+import           Database.PostgreSQL.Simple
+                     ( Connection
+                     , SqlError
+                     , withTransaction
+                     )
+
+
+-- profunctors ---------------------------------------------------------------
+import           Data.Profunctor (lmap)
+
+
+-- time ----------------------------------------------------------------------
+import           Data.Time.Clock (UTCTime)
+import qualified Data.Time.Clock as T (getCurrentTime)
 
 
 -- transformers --------------------------------------------------------------
 import           Control.Monad.Trans.Reader (ReaderT (ReaderT))
+import           Control.Monad.Trans.Except (ExceptT (ExceptT))
+
+
+------------------------------------------------------------------------------
+data Zero = Zero
+  deriving (Show, Typeable, Generic)
+instance Exception Zero
 
 
 ------------------------------------------------------------------------------
 transaction :: (MonadReader Connection m, MonadIO m) => Transaction a -> m a
 transaction (Transaction (ReaderT f)) = ask >>= \connection -> do
-    liftIO $ withTransaction connection (f connection)
+    let ExceptT e = f connection
+    liftIO (withTransaction connection (e >>= either throw return))
 
 
 ------------------------------------------------------------------------------
-newtype Transaction a = Transaction (ReaderT Connection IO a)
+newtype Transaction a =
+    Transaction (ReaderT Connection (ExceptT SomeException IO) a)
   deriving
-    (Functor, Applicative, Monad, MonadFix, Typeable, Generic, Generic1)
+    ( Functor, Applicative, MonadFix, Typeable, Generic, Generic1
+    , MonadAbort SomeException, MonadRecover SomeException
+    )
+
+
+------------------------------------------------------------------------------
+instance Monad Transaction where
+    return = pure
+    Transaction m >>= f = let f' a = let Transaction b = f a in b in
+        Transaction $ m >>= f'
+    fail = throw . PatternMatchFail
+
+
+#if MIN_VERSION_base(4, 9, 0)
+------------------------------------------------------------------------------
+instance MonadFail Transaction where
+    fail = throw . PatternMatchFail
+
+
+#endif
+------------------------------------------------------------------------------
+instance Alternative Transaction where
+    empty = throw Zero
+    a <|> b = a `recover` (\e -> b `catch` (\Zero -> throw e))
+
+
+------------------------------------------------------------------------------
+instance MonadPlus Transaction where
+    mzero = empty
+    mplus = (<|>)
+
+
+#if MIN_VERSION_base(4, 9, 0)
+------------------------------------------------------------------------------
+instance Semigroup (Transaction a) where
+    (<>) = (<|>)
+
+
+#endif
+------------------------------------------------------------------------------
+instance Monoid (Transaction a) where
+    mempty = empty
+    mappend = (<|>)
 
 
 ------------------------------------------------------------------------------
@@ -97,53 +185,70 @@ instance MonadBase Transaction Transaction
 
 
 ------------------------------------------------------------------------------
-query :: FromPG a' a => Query a' -> Transaction [a]
-query = Transaction . ReaderT . flip runQuery
+liftE :: IO a -> ExceptT SomeException IO a
+liftE e = lift (try' e) >>= either throw return
+  where
+    try' :: IO a -> IO (Either SqlError a)
+    try' = try
 
 
 ------------------------------------------------------------------------------
-queryFirst :: FromPG a' a => Query a' -> Transaction (Maybe a)
-queryFirst = fmap listToMaybe . query . limit 1
+query :: (ToPG a a', FromPG b' b) => a -> QueryArr a' b' -> Transaction [b]
+query a q = Transaction . ReaderT $ \c -> liftE $
+    runQuery c $ lmap (const (pg a)) q
 
 
 ------------------------------------------------------------------------------
-insert :: TableArgs ws rs as => Table as -> [Record as] -> Transaction Int64
-insert t as = Transaction . ReaderT $ \c -> runInsertMany c t (map pg as)
+queryFirst :: (ToPG a a', FromPG b' b)
+    => a -> QueryArr a' b' -> Transaction (Maybe b)
+queryFirst a = fmap listToMaybe . query () . limit 1 . lmap (const (pg a))
 
 
 ------------------------------------------------------------------------------
-insertReturning :: (TableArgs ws rs as, FromPG p a)
+insert :: TableArgs ws rs as bs => Table as -> [Record as] -> Transaction Int64
+insert t as = Transaction . ReaderT $ \c ->
+    liftE $ runInsertMany c t (map pg as)
+
+
+------------------------------------------------------------------------------
+insertReturning :: (TableArgs ws rs as bs, FromPG p a)
     => Table as
     -> (Record rs -> p)
     -> [Record as]
     -> Transaction [a]
-insertReturning t f as = Transaction . ReaderT $ \c ->
+insertReturning t f as = Transaction . ReaderT $ \c -> liftE $
     runInsertManyReturning c t (map pg as) f
 
 
 ------------------------------------------------------------------------------
-update :: TableArgs ws rs as
+update :: TableArgs ws rs as bs
     => Table as
     -> (Record ws -> Record ws)
     -> (Record rs -> PG Bool)
     -> Transaction Int64
-update t f p = Transaction . ReaderT $ \c -> runUpdate c t (f . optionify) p
+update t f p = Transaction . ReaderT $ \c -> liftE $
+    runUpdate c t (f . optionify) p
 
 
 ------------------------------------------------------------------------------
-updateReturning :: (TableArgs ws rs as, FromPG p a)
+updateReturning :: (TableArgs ws rs as bs, FromPG p a)
     => Table as
     -> (Record ws -> Record ws)
     -> (Record rs -> PG Bool)
     -> (Record rs -> p)
     -> Transaction [a]
-updateReturning t f p g = Transaction . ReaderT $ \c ->
+updateReturning t f p g = Transaction . ReaderT $ \c -> liftE $
     runUpdateReturning c t (f . optionify) p g
 
 
 ------------------------------------------------------------------------------
-delete :: TableArgs ws rs as
+delete :: TableArgs ws rs as bs
     => Table as
     -> (Record rs -> PG Bool)
     -> Transaction Int64
-delete t f = Transaction . ReaderT $ \c -> runDelete c t f
+delete t f = Transaction . ReaderT $ \c -> liftE $ runDelete c t f
+
+
+------------------------------------------------------------------------------
+getCurrentTime :: Transaction UTCTime
+getCurrentTime = Transaction $ lift $ lift $ T.getCurrentTime

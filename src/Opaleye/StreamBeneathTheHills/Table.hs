@@ -31,6 +31,8 @@ module Opaleye.StreamBeneathTheHills.Table
     , optional
 
     , TableArgs
+
+    , Deoptionify
     , optionify
     )
 where
@@ -89,16 +91,16 @@ class
     ( ws ~ PGMapSnd as
     , as ~ UnPGMapSnd ws
     , rs ~ Deoptionify ws
-    --, rs ~ PGMapSnd bs
+    , rs ~ PGMapSnd bs
     , rs ~ Deoptionify (PGMapSnd as)
-    --, bs ~ UnPGMapSnd rs
-    --, bs ~ Deoptionify as
-    --, bs ~ Deoptionify (UnPGMapSnd ws)
+    , bs ~ UnPGMapSnd rs
+    , bs ~ Deoptionify as
+    , bs ~ Deoptionify (UnPGMapSnd ws)
     , ToPG (Record as) (Record ws)
     , FromPG (Record ws) (Record as)
-    --, ToPG (Record bs) (Record rs)
-    --, FromPG (Record rs) (Record bs)
-    --, Optionify as bs
+    , ToPG (Record bs) (Record rs)
+    , FromPG (Record rs) (Record bs)
+    , Optionify as bs
     , Optionify ws rs
     , Default ColumnMaker (Record rs) (Record rs)
     )
@@ -107,29 +109,29 @@ class
         (ws :: [(Symbol, *)])
         (rs :: [(Symbol, *)])
         (as :: [(Symbol, *)])
-        --(bs :: [(Symbol, *)])
-            | ws -> as rs -- bs
-            , as -> ws rs -- bs
-            --, rs -> bs
-            --, bs -> rs
+        (bs :: [(Symbol, *)])
+            | ws -> as rs bs
+            , as -> ws rs bs
+            , rs -> bs
+            , bs -> rs
 
 
 ------------------------------------------------------------------------------
-instance TableArgs '[] '[] '[] -- '[]
+instance TableArgs '[] '[] '[] '[]
 
 
 ------------------------------------------------------------------------------
 instance
     ( ToPG a w
     , FromPG w a
-    --, ToPG b r
-    --, FromPG r b
+    , ToPG b r
+    , FromPG r b
     , r ~ Deoption w
-    --, b ~ Deoption a
+    , b ~ Deoption a
     , KnownSymbol s
-    --, Optionify ('(s, a) ': as) ('(s, b) ': bs)
+    , Optionify ('(s, a) ': as) ('(s, b) ': bs)
     , Optionify ('(s, w) ': ws) ('(s, r) ': rs)
-    , TableArgs ws rs as -- bs
+    , TableArgs ws rs as bs
     , Default ColumnMaker r r
     )
   =>
@@ -137,7 +139,7 @@ instance
         ('(s, w) ': ws)
         ('(s, r) ': rs)
         ('(s, a) ': as)
-        --('(s, b) ': bs)
+        ('(s, b) ': bs)
 
 
 ------------------------------------------------------------------------------
@@ -150,7 +152,7 @@ table
     ::
         ( Properties wrs ws rs
         , ProductAdaptor TableProperties Field wrs ws rs
-        , TableArgs ws rs as
+        , TableArgs ws rs as bs
         )
     => (String -> String) -> String -> Table as
 table f n = O.Table n $ pRecord (properties f)
@@ -161,7 +163,7 @@ tableWithSchema
     ::
         ( Properties wrs ws rs
         , ProductAdaptor TableProperties Field wrs ws rs
-        , TableArgs ws rs as
+        , TableArgs ws rs as bs
         )
     => (String -> String) -> String -> String -> Table as
 tableWithSchema f n s = O.TableWithSchema n s $ pRecord (properties f)
