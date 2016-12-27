@@ -56,9 +56,7 @@ import           Data.Maybe (listToMaybe)
 import           Data.Monoid (Monoid, mappend, mempty)
 #endif
 import           Data.Int (Int64)
-#if MIN_VERSION_base(4, 9, 0)
 import           Data.Semigroup (Semigroup, (<>))
-#endif
 import           Data.Typeable (Typeable)
 import           GHC.Generics (Generic, Generic1)
 
@@ -75,6 +73,7 @@ import           Monad.Throw (throw)
 
 
 -- opaleye -------------------------------------------------------------------
+import           Opaleye.Column (Column)
 import           Opaleye.Manipulation
                      ( runInsertMany
                      , runInsertManyReturning
@@ -88,12 +87,16 @@ import           Opaleye.RunQuery (runQuery)
 
 
 -- opaleye-of-the-stream-beneath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.TF (PG, ToPG, FromPG, pg)
+import           Opaleye.StreamBeneathTheHills.Column
+                     ( Constant, constant
+                     , Run
+                     )
 import           Opaleye.StreamBeneathTheHills.Table
                      ( Table
-                     , TableArgs
+                     , TableSpec
                      , optionify
                      )
+import           Opaleye.StreamBeneathTheHills.TF (PG)
 
 
 -- postgresql-simple ---------------------------------------------------------
@@ -167,13 +170,11 @@ instance MonadPlus Transaction where
     mplus = (<|>)
 
 
-#if MIN_VERSION_base(4, 9, 0)
 ------------------------------------------------------------------------------
 instance Semigroup (Transaction a) where
     (<>) = (<|>)
 
 
-#endif
 ------------------------------------------------------------------------------
 instance Monoid (Transaction a) where
     mempty = empty
@@ -193,48 +194,49 @@ liftE e = lift (try' e) >>= either throw return
 
 
 ------------------------------------------------------------------------------
-query :: (ToPG a a', FromPG b' b) => a -> QueryArr a' b' -> Transaction [b]
+query :: (Constant a a', Run b b') => a -> QueryArr a' b' -> Transaction [b]
 query a q = Transaction . ReaderT $ \c -> liftE $
-    runQuery c $ lmap (const (pg a)) q
+    runQuery c $ lmap (const (constant a)) q
 
 
 ------------------------------------------------------------------------------
-queryFirst :: (ToPG a a', FromPG b' b)
+queryFirst :: (Constant a a', Run b b')
     => a -> QueryArr a' b' -> Transaction (Maybe b)
-queryFirst a = fmap listToMaybe . query () . limit 1 . lmap (const (pg a))
+queryFirst a =
+    fmap listToMaybe . query () . limit 1 . lmap (const (constant a))
 
 
 ------------------------------------------------------------------------------
-insert :: TableArgs ws rs as bs => Table as -> [Record as] -> Transaction Int64
+insert :: TableSpec ws rs as bs => Table as -> [Record as] -> Transaction Int64
 insert t as = Transaction . ReaderT $ \c ->
-    liftE $ runInsertMany c t (map pg as)
+    liftE $ runInsertMany c t (map constant as)
 
 
 ------------------------------------------------------------------------------
-insertReturning :: (TableArgs ws rs as bs, FromPG p a)
+insertReturning :: (TableSpec ws rs as bs, Run a p)
     => Table as
     -> (Record rs -> p)
     -> [Record as]
     -> Transaction [a]
 insertReturning t f as = Transaction . ReaderT $ \c -> liftE $
-    runInsertManyReturning c t (map pg as) f
+    runInsertManyReturning c t (map constant as) f
 
 
 ------------------------------------------------------------------------------
-update :: TableArgs ws rs as bs
+update :: TableSpec ws rs as bs
     => Table as
     -> (Record ws -> Record ws)
-    -> (Record rs -> PG Bool)
+    -> (Record rs -> Column (PG Bool))
     -> Transaction Int64
 update t f p = Transaction . ReaderT $ \c -> liftE $
     runUpdate c t (f . optionify) p
 
 
 ------------------------------------------------------------------------------
-updateReturning :: (TableArgs ws rs as bs, FromPG p a)
+updateReturning :: (TableSpec ws rs as bs, Run a p)
     => Table as
     -> (Record ws -> Record ws)
-    -> (Record rs -> PG Bool)
+    -> (Record rs -> Column (PG Bool))
     -> (Record rs -> p)
     -> Transaction [a]
 updateReturning t f p g = Transaction . ReaderT $ \c -> liftE $
@@ -242,9 +244,9 @@ updateReturning t f p g = Transaction . ReaderT $ \c -> liftE $
 
 
 ------------------------------------------------------------------------------
-delete :: TableArgs ws rs as bs
+delete :: TableSpec ws rs as bs
     => Table as
-    -> (Record rs -> PG Bool)
+    -> (Record rs -> Column (PG Bool))
     -> Transaction Int64
 delete t f = Transaction . ReaderT $ \c -> liftE $ runDelete c t f
 

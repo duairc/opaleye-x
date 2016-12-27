@@ -21,11 +21,17 @@ library
 
   exposed-modules:
     Opaleye.StreamBeneathTheHills
-    Opaleye.StreamBeneathTheHills.Option
+    Opaleye.StreamBeneathTheHills.Array
+    Opaleye.StreamBeneathTheHills.Column
+    Opaleye.StreamBeneathTheHills.Join
+    Opaleye.StreamBeneathTheHills.Maybe
     Opaleye.StreamBeneathTheHills.Order
     Opaleye.StreamBeneathTheHills.Table
     Opaleye.StreamBeneathTheHills.TF
     Opaleye.StreamBeneathTheHills.Transaction
+
+  other-modules:
+    Opaleye.StreamBeneathTheHills.Internal
 
   build-depends:
     aeson >= 0.1 && < 1.2,
@@ -34,9 +40,9 @@ library
     base >= 4.7 && < 5,
     bytestring >= 0.10 && < 0.11,
     case-insensitive >= 0.1 && < 1.3,
-    contravariant >= 0.1 && < 2,
+    contravariant >= 1.2 && < 2,
     layers >= 1.0.0 && < 2,
-    opaleye >= 0.4 && < 0.6,
+    opaleye >= 0.5 && < 0.6,
     postgresql-simple >= 0.0 && < 0.6,
     product-profunctors >= 0.5 && < 0.8,
     profunctors >= 3.1.1 && < 6,
@@ -47,7 +53,10 @@ library
     uuid-types >= 1 && < 2
 
   if impl(ghc < 7.10)
-    build-depends: transformers > 0.2 && < 0.6
+    build-depends: transformers >= 0.2 && < 0.6
+
+  if impl(ghc < 8)
+    build-depends: semigroups >= 0.1
 
   if impl(ghc >= 7.6)
     cpp-options: -DDataPolyKinds
