@@ -1,4 +1,6 @@
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
@@ -84,6 +86,7 @@ import           Opaleye.Manipulation
 import           Opaleye.Order (limit)
 import           Opaleye.QueryArr (QueryArr)
 import           Opaleye.RunQuery (runQuery)
+import qualified Opaleye.Table as O (Table)
 
 
 -- opaleye-of-the-stream-beneath-the-hills -----------------------------------

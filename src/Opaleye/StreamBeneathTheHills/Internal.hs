@@ -16,6 +16,13 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
+#if __GLASGOW_HASKELL__ < 710
+{-# LANGUAGE OverlappingInstances #-}
+#define __OVERLAPS__
+#else
+#define __OVERLAPS__ {-# OVERLAPS #-}
+#endif
+
 module Opaleye.StreamBeneathTheHills.Internal
     ( Columns
     , Constant, constant
@@ -62,6 +69,9 @@ import           Data.Anonymous.Profunctor ()
 
 -- base ----------------------------------------------------------------------
 import           Control.Applicative (Alternative, Const)
+#if !MIN_VERSION_base(4, 8, 0)
+import           Control.Applicative (Applicative)
+#endif
 import           Control.Monad (MonadPlus)
 import           Control.Monad.Zip (MonadZip, mzip, munzip)
 #if !MIN_VERSION_base(4, 8, 0)
@@ -1105,7 +1115,7 @@ instance Default PropertiesPP (Option (Column a)) (Column a) where
 
 
 ------------------------------------------------------------------------------
-instance (Default PropertiesPP (f a) (f b), KnownSymbol s) =>
+instance __OVERLAPS__ (Default PropertiesPP (f a) (f b), KnownSymbol s) =>
     Default PropertiesPP (Labeled f '(s, a)) (Labeled f '(s, b))
   where
     def = let PropertiesPP p = def in PropertiesPP $ \ns ->
@@ -1142,7 +1152,9 @@ instance (Functor f, Profunctor p) => Profunctor (L f p) where
 
 
 ------------------------------------------------------------------------------
-instance (MonadZip f, ProductProfunctor p) => ProductProfunctor (L f p) where
+instance (Functor f, MonadZip f, ProductProfunctor p) =>
+    ProductProfunctor (L f p)
+  where
     empty = L (lmap (const ()) empty)
     L a ***! L b = L (lmap munzip (a ***! b))
 
@@ -1157,7 +1169,9 @@ instance (Functor f, Profunctor p) => Profunctor (R f p) where
 
 
 ------------------------------------------------------------------------------
-instance (MonadZip f, ProductProfunctor     p) => ProductProfunctor (R f p) where
+instance (Functor f, MonadZip f, ProductProfunctor p) =>
+    ProductProfunctor (R f p)
+  where
     empty = R (rmap return empty)
     R a ***! R b = R (rmap (uncurry mzip) (a ***! b))
 
@@ -1170,10 +1184,18 @@ type Table as = O.Table
 
 ------------------------------------------------------------------------------
 class
-    ( Columns (Record bs) (Record rs)
-    , DistributeColumn (Record as) ~ Record ws
-    , CollectColumn (Record ws) ~ Record as
-    , Default O.Constant (Record as) (Record ws)
+    ( rs ~ MapSndCollectOptional ws
+    , bs ~ MapSndCollectOptional as
+    , ws ~ MapSndDistributeColumn as
+    , as ~ MapSndCollectColumn ws
+    , rs ~ MapSndDistributeColumn bs
+    , bs ~ MapSndCollectColumn rs
+    , rs ~ MapSndDistributeColumn (MapSndCollectOptional as)
+    , rs ~ MapSndCollectOptional (MapSndDistributeColumn as)
+    , bs ~ MapSndDistributeColumn (MapSndCollectOptional ws)
+    , bs ~ MapSndCollectOptional (MapSndDistributeColumn ws)
+    , Constant (Record as) (Record ws)
+    , Constant (Record bs) (Record rs)
     , Optionify as bs
     , Optionify ws rs
     , Default ColumnMaker (Record rs) (Record rs)
@@ -1188,10 +1210,18 @@ instance TableSpec '[] '[] '[] '[]
 
 ------------------------------------------------------------------------------
 instance
-    ( Columns b r
-    , DistributeColumn a ~ w
-    , CollectColumn w ~ a
-    , Default O.Constant a w
+    ( ('(s, r) ': rs) ~ MapSndCollectOptional ('(s, w) ': ws)
+    , ('(s, b) ': bs) ~ MapSndCollectOptional ('(s, a) ': as)
+    , ('(s, w) ': ws) ~ MapSndDistributeColumn ('(s, a) ': as)
+    , ('(s, a) ': as) ~ MapSndCollectColumn ('(s, w) ': ws)
+    , ('(s, r) ': rs) ~ MapSndDistributeColumn ('(s, b) ': bs)
+    , ('(s, b) ': bs) ~ MapSndCollectColumn ('(s, r) ': rs)
+    , ('(s, r) ': rs) ~ MapSndDistributeColumn (MapSndCollectOptional ('(s, a) ': as))
+    , ('(s, r) ': rs) ~ MapSndCollectOptional (MapSndDistributeColumn ('(s, a) ': as))
+    , ('(s, b) ': bs) ~ MapSndDistributeColumn (MapSndCollectOptional ('(s, w) ': ws))
+    , ('(s, b) ': bs) ~ MapSndCollectOptional (MapSndDistributeColumn ('(s, w) ': ws))
+    , Constant a w
+    , Constant b r
     , Optionify ('(s, a) ': as) ('(s, b) ': bs)
     , Optionify ('(s, w) ': ws) ('(s, r) ': rs)
     , Default ColumnMaker r r
@@ -1230,7 +1260,7 @@ instance (Override a, Optionify ws rs) =>
     Optionify ('(s, Optional a) ': ws) ('(s, a) ': rs)
   where
     optionify (Cons (Labeled a) as) =
-        Cons (Labeled (override <$> a)) (optionify as)
+        Cons (Labeled (fmap override a)) (optionify as)
 
 
 ------------------------------------------------------------------------------

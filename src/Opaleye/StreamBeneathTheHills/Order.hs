@@ -59,7 +59,7 @@ instance ProductProfunctor OrderPP where
 
 ------------------------------------------------------------------------------
 instance PGOrd a => Default OrderPP (Column a) (Column a) where
-    def = OrderPP id
+    def = OrderPP (\x -> x)
 
 
 ------------------------------------------------------------------------------
