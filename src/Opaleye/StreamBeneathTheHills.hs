@@ -1,6 +1,5 @@
 module Opaleye.StreamBeneathTheHills
     ( module Opaleye.StreamBeneathTheHills.Array
-    , module Opaleye.StreamBeneathTheHills.Column
     , module Opaleye.StreamBeneathTheHills.Join
     , module Opaleye.StreamBeneathTheHills.Maybe
     , module Opaleye.StreamBeneathTheHills.Order
@@ -12,7 +11,6 @@ where
 
 -- opaleye-of-the-stream-beneath-the-hills -----------------------------------
 import           Opaleye.StreamBeneathTheHills.Array
-import           Opaleye.StreamBeneathTheHills.Column
 import           Opaleye.StreamBeneathTheHills.Join
 import           Opaleye.StreamBeneathTheHills.Maybe
 import           Opaleye.StreamBeneathTheHills.Order

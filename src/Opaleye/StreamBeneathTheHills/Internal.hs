@@ -23,35 +23,7 @@
 #define __OVERLAPS__ {-# OVERLAPS #-}
 #endif
 
-module Opaleye.StreamBeneathTheHills.Internal
-    ( Columns
-    , Constant, constant
-    , Run
-
-    , PG
-    , UnPG
-
-    , PGArray
-    , PGFromList, pgFromList
-    , ArrayAgg, arrayAgg
-
-    , PGMaybe
-    , PGMatchMaybe, pgMatchMaybe
-    , PGNothing, pgNothing
-    , PGJust, pgJust
-    , PGIsJust, pgIsJust, pgIsNothing
-
-    , Optional
-    , MatchOptional, matchOptional
-    , Defaults, defaults
-    , Override, override
-    , Optionify, optionify
-
-    , Table, table, tableWithSchema
-    , TableSpec
-    , Properties, properties
-    )
-where
+module Opaleye.StreamBeneathTheHills.Internal where
 
 -- aeson ---------------------------------------------------------------------
 import           Data.Aeson (Value)
@@ -170,41 +142,41 @@ import           Data.UUID.Types (UUID)
 
 
 ------------------------------------------------------------------------------
-type family PG a :: *
-type instance PG Bool = PGBool
-type instance PG ByteString = PGBytea
-type instance PG (CI Text) = PGCitext
-type instance PG Day = PGDate
-type instance PG Double = PGFloat8
-type instance PG Float = PGFloat4
-type instance PG Int16 = PGInt2
-type instance PG Int32 = PGInt4
-type instance PG Int64 = PGInt8
-type instance PG LocalTime = PGTimestamp
-type instance PG Text = PGText
-type instance PG TimeOfDay = PGTime
-type instance PG UTCTime = PGTimestamptz
-type instance PG UUID = PGUuid
-type instance PG Value = PGJsonb
+type family PGScalar a :: *
+type instance PGScalar Bool = PGBool
+type instance PGScalar ByteString = PGBytea
+type instance PGScalar (CI Text) = PGCitext
+type instance PGScalar Day = PGDate
+type instance PGScalar Double = PGFloat8
+type instance PGScalar Float = PGFloat4
+type instance PGScalar Int16 = PGInt2
+type instance PGScalar Int32 = PGInt4
+type instance PGScalar Int64 = PGInt8
+type instance PGScalar LocalTime = PGTimestamp
+type instance PGScalar Text = PGText
+type instance PGScalar TimeOfDay = PGTime
+type instance PGScalar UTCTime = PGTimestamptz
+type instance PGScalar UUID = PGUuid
+type instance PGScalar Value = PGJsonb
 
 
 ------------------------------------------------------------------------------
-type family UnPG a :: *
-type instance UnPG PGBool = Bool
-type instance UnPG PGBytea = ByteString
-type instance UnPG PGCitext = CI Text
-type instance UnPG PGDate = Day
-type instance UnPG PGFloat8 = Double
-type instance UnPG PGFloat4 = Float
-type instance UnPG PGInt2 = Int16
-type instance UnPG PGInt4 = Int32
-type instance UnPG PGInt8 = Int64
-type instance UnPG PGTimestamp = LocalTime
-type instance UnPG PGText = Text
-type instance UnPG PGTime = TimeOfDay
-type instance UnPG PGTimestamptz = UTCTime
-type instance UnPG PGUuid = UUID
-type instance UnPG PGJsonb = Value
+type family UnPGScalar a :: *
+type instance UnPGScalar PGBool = Bool
+type instance UnPGScalar PGBytea = ByteString
+type instance UnPGScalar PGCitext = CI Text
+type instance UnPGScalar PGDate = Day
+type instance UnPGScalar PGFloat8 = Double
+type instance UnPGScalar PGFloat4 = Float
+type instance UnPGScalar PGInt2 = Int16
+type instance UnPGScalar PGInt4 = Int32
+type instance UnPGScalar PGInt8 = Int64
+type instance UnPGScalar PGTimestamp = LocalTime
+type instance UnPGScalar PGText = Text
+type instance UnPGScalar PGTime = TimeOfDay
+type instance UnPGScalar PGTimestamptz = UTCTime
+type instance UnPGScalar PGUuid = UUID
+type instance UnPGScalar PGJsonb = Value
 
 
 ------------------------------------------------------------------------------
@@ -256,7 +228,7 @@ type family DistributeColumn a :: * where
     DistributeColumn (Maybe a) = PGMaybe (DistributeColumn a)
     DistributeColumn (Option a) = Option (DistributeColumn a)
     DistributeColumn (Optional a) = Optional (DistributeColumn a)
-    DistributeColumn a = Column (PG a)
+    DistributeColumn a = Column (PGScalar a)
 
 
 ------------------------------------------------------------------------------
@@ -317,7 +289,7 @@ type family CollectColumn a :: * where
     CollectColumn (PGMaybe a) = Maybe (CollectColumn a)
     CollectColumn (Option a) = Option (CollectColumn a)
     CollectColumn (Optional a) = Optional (CollectColumn a)
-    CollectColumn (Column a) = UnPG a
+    CollectColumn (Column a) = UnPGScalar a
 
 
 ------------------------------------------------------------------------------

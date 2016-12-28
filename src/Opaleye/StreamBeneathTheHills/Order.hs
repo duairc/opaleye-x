@@ -29,7 +29,7 @@ import           Opaleye.QueryArr (Query, QueryArr)
 
 
 -- opaleye-of-the-stream-beneath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.Column (Constant, constant)
+import           Opaleye.StreamBeneathTheHills.TF (PGIn, pg)
 
 
 -- profunctors ---------------------------------------------------------------
@@ -89,5 +89,5 @@ descNullsLast f =
 
 
 ------------------------------------------------------------------------------
-ordered :: (Constant a p, Orderable o) => a -> QueryArr p (o, b) -> Query (o, b)
-ordered i = orderBy (asc fst) . lmap (const (constant i))
+ordered :: (PGIn a p, Orderable o) => a -> QueryArr p (o, b) -> Query (o, b)
+ordered i = orderBy (asc fst) . lmap (const (pg i))

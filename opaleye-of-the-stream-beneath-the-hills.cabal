@@ -22,7 +22,6 @@ library
   exposed-modules:
     Opaleye.StreamBeneathTheHills
     Opaleye.StreamBeneathTheHills.Array
-    Opaleye.StreamBeneathTheHills.Column
     Opaleye.StreamBeneathTheHills.Join
     Opaleye.StreamBeneathTheHills.Maybe
     Opaleye.StreamBeneathTheHills.Order
