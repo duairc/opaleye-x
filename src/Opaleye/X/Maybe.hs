@@ -13,7 +13,7 @@
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module Opaleye.StreamBeneathTheHills.Maybe
+module Opaleye.X.Maybe
     ( PGMaybe
     , PGMatchMaybe, pgMatchMaybe
     , PGNothing, pgNothing
@@ -47,9 +47,9 @@ import           Opaleye.Operators ((.&&), ifThenElseMany, not)
 import           Opaleye.RunQuery (QueryRunner)
 
 
--- opaleye-of-the-stream-beheath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.Internal
-import           Opaleye.StreamBeneathTheHills.TF (PG, pg)
+-- opaleye-x -----------------------------------------------------------------
+import           Opaleye.X.Internal
+import           Opaleye.X.TF (PG, pg)
 
 
 -- profunctors ---------------------------------------------------------------

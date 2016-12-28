@@ -6,7 +6,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Opaleye.StreamBeneathTheHills.Internal where
+module Opaleye.X.Internal where
 
 -- aeson ---------------------------------------------------------------------
 import           Data.Aeson (Value)

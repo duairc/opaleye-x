@@ -6,7 +6,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Trustworthy #-}
 
-module Opaleye.StreamBeneathTheHills.Order
+module Opaleye.X.Order
     ( Orderable
     , asc
     , desc
@@ -28,8 +28,8 @@ import qualified Opaleye.Order as O (asc, desc, ascNullsFirst, descNullsLast)
 import           Opaleye.QueryArr (Query, QueryArr)
 
 
--- opaleye-of-the-stream-beneath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.TF (PGIn, pg)
+-- opaleye-x -----------------------------------------------------------------
+import           Opaleye.X.TF (PGIn, pg)
 
 
 -- profunctors ---------------------------------------------------------------

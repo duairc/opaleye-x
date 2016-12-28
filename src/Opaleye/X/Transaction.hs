@@ -13,7 +13,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
-module Opaleye.StreamBeneathTheHills.Transaction
+module Opaleye.X.Transaction
     ( Transaction
     , transaction
 
@@ -82,13 +82,10 @@ import           Opaleye.QueryArr (QueryArr)
 import           Opaleye.RunQuery (runQuery)
 
 
--- opaleye-of-the-stream-beneath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.Optional
-                     ( Optionalize
-                     , optionalize
-                     )
-import           Opaleye.StreamBeneathTheHills.TF (PGIn, PGOut, PG, pg)
-import           Opaleye.StreamBeneathTheHills.Table (Table)
+-- opaleye-x -----------------------------------------------------------------
+import           Opaleye.X.Optional (Optionalize, optionalize)
+import           Opaleye.X.TF (PGIn, PGOut, PG, pg)
+import           Opaleye.X.Table (Table)
 
 
 -- postgresql-simple ---------------------------------------------------------

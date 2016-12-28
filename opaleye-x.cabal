@@ -1,4 +1,4 @@
-name:           opaleye-of-the-stream-beneath-the-hills
+name:           opaleye-x
 version:        0.1
 synopsis:       Boilerplate for Opaleye, making use of anonymous-data's records
 license:        MPL-2.0
@@ -9,8 +9,8 @@ stability:      Experimental
 category:       Type
 cabal-version:  >= 1.6
 build-type:     Simple
-homepage:       https://github.com/duairc/opaleye-of-the-stream-beneath-the-hills
-bug-reports:    https://github.com/duairc/opaleye-of-the-stream-beneath-the-hills/issues
+homepage:       https://github.com/duairc/opaleye-x
+bug-reports:    https://github.com/duairc/opaleye-x/issues
 
 extra-source-files:
   LICENSE
@@ -23,18 +23,18 @@ library
     include
 
   exposed-modules:
-    Opaleye.StreamBeneathTheHills
-    Opaleye.StreamBeneathTheHills.Array
-    Opaleye.StreamBeneathTheHills.Join
-    Opaleye.StreamBeneathTheHills.Maybe
-    Opaleye.StreamBeneathTheHills.Optional
-    Opaleye.StreamBeneathTheHills.Order
-    Opaleye.StreamBeneathTheHills.Table
-    Opaleye.StreamBeneathTheHills.TF
-    Opaleye.StreamBeneathTheHills.Transaction
+    Opaleye.X
+    Opaleye.X.Array
+    Opaleye.X.Join
+    Opaleye.X.Maybe
+    Opaleye.X.Optional
+    Opaleye.X.Order
+    Opaleye.X.Table
+    Opaleye.X.TF
+    Opaleye.X.Transaction
 
   other-modules:
-    Opaleye.StreamBeneathTheHills.Internal
+    Opaleye.X.Internal
 
   build-depends:
     aeson >= 0.1 && < 1.2,
@@ -74,4 +74,4 @@ library
 
 source-repository head
   type:     git
-  location: https://github.com/duairc/opaleye-of-the-stream-beneath-the-hills.git
+  location: https://github.com/duairc/opaleye-x.git

@@ -11,7 +11,7 @@
 
 #include "overlap.h"
 
-module Opaleye.StreamBeneathTheHills.Table
+module Opaleye.X.Table
     ( Table, table, tableWithSchema
     , Properties, properties
     )
@@ -32,9 +32,9 @@ import           Opaleye.Table (TableProperties, optional, required)
 import qualified Opaleye.Table as O (Table (Table, TableWithSchema))
 
 
--- opaleye-of-the-stream-beheath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.Internal
-import           Opaleye.StreamBeneathTheHills.Optional ()
+-- opaleye-x -----------------------------------------------------------------
+import           Opaleye.X.Internal
+import           Opaleye.X.Optional ()
 
 
 -- profunctors ---------------------------------------------------------------

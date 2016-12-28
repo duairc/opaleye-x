@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Opaleye.StreamBeneathTheHills.TF
+module Opaleye.X.TF
     ( PG, pg
     , UnPG
     , PGRep
@@ -18,8 +18,8 @@ import           Opaleye.Constant (Constant, constant)
 import           Opaleye.RunQuery (QueryRunner)
 
 
--- opaleye-of-the-stream-beheath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.Internal
+-- opaleye-x -----------------------------------------------------------------
+import           Opaleye.X.Internal
 
 
 -- product-profunctors -------------------------------------------------------

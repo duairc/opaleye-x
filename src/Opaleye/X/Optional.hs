@@ -16,7 +16,7 @@
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module Opaleye.StreamBeneathTheHills.Optional
+module Opaleye.X.Optional
     ( Optional
     , MatchOptional, matchOptional
     , Defaults, defaults
@@ -45,8 +45,8 @@ import           Data.Typeable (Typeable)
 import           GHC.Generics (Generic, Generic1)
 
 
--- opaleye-of-the-stream-beheath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.Internal
+-- opaleye-x -----------------------------------------------------------------
+import           Opaleye.X.Internal
 
 
 -- profunctors ---------------------------------------------------------------

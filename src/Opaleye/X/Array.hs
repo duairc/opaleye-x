@@ -11,7 +11,7 @@
 
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
-module Opaleye.StreamBeneathTheHills.Array
+module Opaleye.X.Array
     ( PGArray
     , PGFromList, pgFromList
     , ArrayAgg, arrayAgg
@@ -33,8 +33,8 @@ import qualified Opaleye.PGTypes as O (PGArray)
 import           Opaleye.RunQuery (QueryRunner)
 
 
--- opaleye-of-the-stream-beheath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.Internal
+-- opaleye-x -----------------------------------------------------------------
+import           Opaleye.X.Internal
 
 
 -- profunctors ---------------------------------------------------------------

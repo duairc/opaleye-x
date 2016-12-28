@@ -2,7 +2,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TypeFamilies #-}
 
-module Opaleye.StreamBeneathTheHills.Join
+module Opaleye.X.Join
     ( Join
     , leftJoin
     , rightJoin
@@ -19,8 +19,8 @@ import           Opaleye.PGTypes (PGBool)
 import           Opaleye.QueryArr (Query)
 
 
--- opaleye-of-the-stream-beneath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.Maybe
+-- opaleye-x -----------------------------------------------------------------
+import           Opaleye.X.Maybe
                      ( PGMaybe
                      , PGJust, pgJust
                      , PGNothing, pgNothing
