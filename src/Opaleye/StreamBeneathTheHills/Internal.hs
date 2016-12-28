@@ -17,12 +17,15 @@
 {-# LANGUAGE UndecidableInstances #-}
 
 #if __GLASGOW_HASKELL__ < 710
+{-# LANGUAGE IncoherentInstances #-}
 {-# LANGUAGE OverlappingInstances #-}
 #define __OVERLAPS__
 #define __OVERLAPPABLE__
+#define __INCOHERENT__
 #else
 #define __OVERLAPS__ {-# OVERLAPS #-}
 #define __OVERLAPPABLE__ {-# OVERLAPPABLE #-}
+#define __INCOHERENT__ {-# INCOHERENT #-}
 #endif
 
 module Opaleye.StreamBeneathTheHills.Internal where
@@ -1181,6 +1184,7 @@ type family CollectOptional a :: * where
     CollectOptional (Maybe a) = Maybe (CollectOptional a)
     CollectOptional (Option a) = Option (CollectOptional a)
     CollectOptional (Optional a) = CollectOptional a
+    CollectOptional a = a
 
 
 ------------------------------------------------------------------------------
@@ -1199,6 +1203,11 @@ type family MapSndCollectOptional (as :: [(k, *)]) :: [(k, *)] where
 ------------------------------------------------------------------------------
 newtype OptionalizePP a b = OptionalizePP (a -> b)
   deriving (Profunctor, ProductProfunctor)
+
+
+------------------------------------------------------------------------------
+instance __INCOHERENT__ Default OptionalizePP a a where
+    def = OptionalizePP id
 
 
 ------------------------------------------------------------------------------
