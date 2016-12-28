@@ -1,5 +1,5 @@
 module Opaleye.StreamBeneathTheHills.Table
-    ( Table
+    ( Table, table, tableWithSchema
     , TableSpec
     , Properties, properties
 
@@ -13,10 +13,9 @@ where
 
 -- opaleye-of-the-stream-beheath-the-hills -----------------------------------
 import           Opaleye.StreamBeneathTheHills.Internal
-                     ( Table
+                     ( Table, table, tableWithSchema
                      , TableSpec
                      , Properties, properties
-
                      , Optional
                      , MatchOptional, matchOptional
                      , Defaults, defaults

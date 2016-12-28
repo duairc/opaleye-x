@@ -45,12 +45,11 @@ module Opaleye.StreamBeneathTheHills.Internal
     , MatchOptional, matchOptional
     , Defaults, defaults
     , Override, override
-
-    , Properties, properties
-
-    , Table
-    , TableSpec
     , Optionify, optionify
+
+    , Table, table, tableWithSchema
+    , TableSpec
+    , Properties, properties
     )
 where
 
@@ -140,7 +139,7 @@ import           Opaleye.PGTypes
 import qualified Opaleye.PGTypes as O (PGArray)
 import           Opaleye.RunQuery (QueryRunner)
 import           Opaleye.Table (TableProperties, required, optional)
-import qualified Opaleye.Table as O (Table)
+import qualified Opaleye.Table as O (Table (Table, TableWithSchema))
 
 
 -- profunctors ---------------------------------------------------------------
@@ -1230,6 +1229,18 @@ instance
     )
   =>
     TableSpec ('(s, w) ': ws) ('(s, r) ': rs) ('(s, a) ': as) ('(s, b) ': bs)
+
+
+------------------------------------------------------------------------------
+table :: (TableSpec ws rs as bs, Properties (Record ws) (Record rs))
+    => ([String] -> String) -> String -> Table as
+table mangler s = O.Table s (properties mangler)
+
+
+------------------------------------------------------------------------------
+tableWithSchema :: (TableSpec ws rs as bs, Properties (Record ws) (Record rs))
+    => ([String] -> String) -> String -> String -> Table as
+tableWithSchema mangler n s = O.TableWithSchema n s (properties mangler)
 
 
 ------------------------------------------------------------------------------

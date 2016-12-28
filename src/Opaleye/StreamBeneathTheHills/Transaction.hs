@@ -40,7 +40,7 @@ import           Data.Anonymous.Product (Record)
 -- base ----------------------------------------------------------------------
 import           Control.Applicative (Alternative, (<|>), empty)
 #if !MIN_VERSION_base(4, 8, 0)
-import           Control.Applicative (Applicative, (<$>), pure)
+import           Control.Applicative (Applicative, pure)
 #endif
 import           Control.Exception
                      ( Exception
@@ -86,7 +86,6 @@ import           Opaleye.Manipulation
 import           Opaleye.Order (limit)
 import           Opaleye.QueryArr (QueryArr)
 import           Opaleye.RunQuery (runQuery)
-import qualified Opaleye.Table as O (Table)
 
 
 -- opaleye-of-the-stream-beneath-the-hills -----------------------------------
