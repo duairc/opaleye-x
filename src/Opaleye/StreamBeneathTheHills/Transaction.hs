@@ -32,10 +32,6 @@ module Opaleye.StreamBeneathTheHills.Transaction
     )
 where
 
--- anonymous-data ------------------------------------------------------------
-import           Data.Anonymous.Product (Record)
-
-
 -- base ----------------------------------------------------------------------
 import           Control.Applicative (Alternative, (<|>), empty)
 #if !MIN_VERSION_base(4, 8, 0)
@@ -84,7 +80,6 @@ import           Opaleye.Manipulation
 import           Opaleye.Order (limit)
 import           Opaleye.QueryArr (QueryArr)
 import           Opaleye.RunQuery (runQuery)
-import qualified Opaleye.Table as O (Table)
 
 
 -- opaleye-of-the-stream-beneath-the-hills -----------------------------------
@@ -96,8 +91,7 @@ import           Opaleye.StreamBeneathTheHills.TF
                      )
 import           Opaleye.StreamBeneathTheHills.Table
                      ( Table
-                     , TableSpec
-                     , optionify
+                     , Optionalize, optionalize
                      )
 
 
@@ -208,45 +202,42 @@ queryFirst a = fmap listToMaybe . query () . limit 1 . lmap (const (pg a))
 
 
 ------------------------------------------------------------------------------
-insert :: TableSpec ws rs as bs => Table as -> [Record as] -> Transaction Int64
+insert :: PGIn as ws => Table ws -> [as] -> Transaction Int64
 insert t as = Transaction . ReaderT $ \c ->
     liftE $ runInsertMany c t (map pg as)
 
 
 ------------------------------------------------------------------------------
-insertReturning :: (TableSpec ws rs as bs, PGOut p a)
-    => Table as
-    -> (Record rs -> p)
-    -> [Record as]
-    -> Transaction [a]
+insertReturning :: (Optionalize rs ws, PGIn as ws, PGOut p a)
+    => Table ws -> (rs -> p) -> [as] -> Transaction [a]
 insertReturning t f as = Transaction . ReaderT $ \c -> liftE $
     runInsertManyReturning c t (map pg as) f
 
 
 ------------------------------------------------------------------------------
-update :: TableSpec ws rs as bs
-    => Table as
-    -> (Record ws -> Record ws)
-    -> (Record rs -> PG Bool)
+update :: Optionalize rs ws
+    => Table ws
+    -> (ws -> ws)
+    -> (rs -> PG Bool)
     -> Transaction Int64
 update t f p = Transaction . ReaderT $ \c -> liftE $
-    runUpdate c t (f . optionify) p
+    runUpdate c t (f . optionalize) p
 
 
 ------------------------------------------------------------------------------
-updateReturning :: (TableSpec ws rs as bs, PGOut p a)
-    => Table as
-    -> (Record ws -> Record ws)
-    -> (Record rs -> PG Bool)
-    -> (Record rs -> p)
+updateReturning :: (Optionalize rs ws, PGOut p a)
+    => Table ws
+    -> (ws -> ws)
+    -> (rs -> PG Bool)
+    -> (rs -> p)
     -> Transaction [a]
 updateReturning t f p g = Transaction . ReaderT $ \c -> liftE $
-    runUpdateReturning c t (f . optionify) p g
+    runUpdateReturning c t (f . optionalize) p g
 
 
 ------------------------------------------------------------------------------
 delete
-    :: O.Table ws rs
+    :: Optionalize rs ws => Table ws
     -> (rs -> PG Bool)
     -> Transaction Int64
 delete t f = Transaction . ReaderT $ \c -> liftE $ runDelete c t f

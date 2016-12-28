@@ -19,8 +19,10 @@
 #if __GLASGOW_HASKELL__ < 710
 {-# LANGUAGE OverlappingInstances #-}
 #define __OVERLAPS__
+#define __OVERLAPPABLE__
 #else
 #define __OVERLAPS__ {-# OVERLAPS #-}
+#define __OVERLAPPABLE__ {-# OVERLAPPABLE #-}
 #endif
 
 module Opaleye.StreamBeneathTheHills.Internal where
@@ -30,7 +32,7 @@ import           Data.Aeson (Value)
 
 
 -- anonymous-data ------------------------------------------------------------
-import           Data.Anonymous.Product (Product (Cons, Nil), Record, Tuple)
+import           Data.Anonymous.Product (Record, Tuple)
 import           Data.Labeled (Field, Labeled (Labeled))
 
 
@@ -85,7 +87,6 @@ import           Opaleye.Column
                      )
 import qualified Opaleye.Constant as O (Constant, constant)
 import           Opaleye.Internal.Operators (IfPP)
-import           Opaleye.Internal.TableMaker (ColumnMaker)
 import           Opaleye.Operators ((.&&), ifThenElseMany)
 import qualified Opaleye.Operators as O (not)
 import           Opaleye.PGTypes
@@ -1086,6 +1087,14 @@ instance Default PropertiesPP (Option (Column a)) (Column a) where
 
 
 ------------------------------------------------------------------------------
+instance (Options a o, Default PropertiesPP o b) =>
+    Default PropertiesPP (Optional a) b
+  where
+    def = let PropertiesPP p = def in PropertiesPP $ \ns f ->
+        lmap (\(Optional a) -> a) (p ns f)
+
+
+------------------------------------------------------------------------------
 instance __OVERLAPS__ (Default PropertiesPP (f a) (f b), KnownSymbol s) =>
     Default PropertiesPP (Labeled f '(s, a)) (Labeled f '(s, b))
   where
@@ -1097,20 +1106,129 @@ instance __OVERLAPS__ (Default PropertiesPP (f a) (f b), KnownSymbol s) =>
 
 
 ------------------------------------------------------------------------------
-instance (Options a o, Default PropertiesPP o b) =>
-    Default PropertiesPP (Optional a) b
-  where
-    def = let PropertiesPP p = def in PropertiesPP $ \ns f ->
-        lmap (\(Optional a) -> a) (p ns f)
-
-
-------------------------------------------------------------------------------
 type Properties = Default PropertiesPP
 
 
 ------------------------------------------------------------------------------
 properties :: Properties a b => ([String] -> String) -> TableProperties a b
 properties = let PropertiesPP p = def in p []
+
+
+------------------------------------------------------------------------------
+type Table ws = O.Table ws (CollectOptional ws)
+
+
+------------------------------------------------------------------------------
+table :: (Properties ws rs, Optionalize rs ws)
+    => ([String] -> String) -> String -> Table ws
+table mangler s = O.Table s (properties mangler)
+
+
+------------------------------------------------------------------------------
+tableWithSchema :: (Properties ws rs, Optionalize rs ws)
+    => ([String] -> String) -> String -> String -> Table ws
+tableWithSchema mangler n s = O.TableWithSchema n s (properties mangler)
+
+
+------------------------------------------------------------------------------
+type family CollectOptional a :: * where
+    CollectOptional () = ()
+    CollectOptional (a, b) = (CollectOptional a, CollectOptional b)
+    CollectOptional (a, b, c) =
+        (CollectOptional a, CollectOptional b, CollectOptional c)
+    CollectOptional (a, b, c, d) =
+        ( CollectOptional a, CollectOptional b, CollectOptional c
+        , CollectOptional d
+        )
+    CollectOptional (a, b, c, d, e) =
+        ( CollectOptional a, CollectOptional b, CollectOptional c
+        , CollectOptional d, CollectOptional e
+        )
+    CollectOptional (a, b, c, d, e, f) =
+        ( CollectOptional a, CollectOptional b, CollectOptional c
+        , CollectOptional d, CollectOptional e, CollectOptional f
+        )
+    CollectOptional (a, b, c, d, e, f, g) =
+        ( CollectOptional a, CollectOptional b, CollectOptional c
+        , CollectOptional d, CollectOptional e, CollectOptional f
+        , CollectOptional g
+        )
+    CollectOptional (a, b, c, d, e, f, g, h) =
+        ( CollectOptional a, CollectOptional b, CollectOptional c
+        , CollectOptional d, CollectOptional e, CollectOptional f
+        , CollectOptional g, CollectOptional h
+        )
+    CollectOptional (a, b, c, d, e, f, g, h, i) =
+        ( CollectOptional a, CollectOptional b, CollectOptional c
+        , CollectOptional d, CollectOptional e, CollectOptional f
+        , CollectOptional g, CollectOptional h, CollectOptional i
+        )
+    CollectOptional (a, b, c, d, e, f, g, h, i, j) =
+        ( CollectOptional a, CollectOptional b, CollectOptional c
+        , CollectOptional d, CollectOptional e, CollectOptional f
+        , CollectOptional g, CollectOptional h, CollectOptional i
+        , CollectOptional j
+        )
+    CollectOptional (Tuple as) = Tuple (MapCollectOptional as)
+    CollectOptional (Record as) = Record (MapSndCollectOptional as)
+    CollectOptional (Const a c) = Const (CollectOptional a) c
+    CollectOptional (Identity a) = Identity (CollectOptional a)
+    CollectOptional (Tagged s a) = Tagged s (CollectOptional a)
+    CollectOptional (Field '(s, a)) = Field '(s, CollectOptional a)
+    CollectOptional (PGArray a) = PGArray (CollectOptional a)
+    CollectOptional [a] = [CollectOptional a]
+    CollectOptional (PGMaybe a) = PGMaybe a
+    CollectOptional (Maybe a) = Maybe (CollectOptional a)
+    CollectOptional (Option a) = Option (CollectOptional a)
+    CollectOptional (Optional a) = CollectOptional a
+
+
+------------------------------------------------------------------------------
+type family MapCollectOptional (as :: [*]) :: [*] where
+    MapCollectOptional '[] = '[]
+    MapCollectOptional (a ': as) = CollectOptional a ': MapCollectOptional as
+
+
+------------------------------------------------------------------------------
+type family MapSndCollectOptional (as :: [(k, *)]) :: [(k, *)] where
+    MapSndCollectOptional '[] = '[]
+    MapSndCollectOptional ('(s, a) ': as) =
+        '(s, CollectOptional a) ': MapSndCollectOptional as
+
+
+------------------------------------------------------------------------------
+newtype OptionalizePP a b = OptionalizePP (a -> b)
+  deriving (Profunctor, ProductProfunctor)
+
+
+------------------------------------------------------------------------------
+instance Default OptionalizePP a (Option a) where
+    def = OptionalizePP (Option . Just)
+
+
+------------------------------------------------------------------------------
+instance __OVERLAPS__
+    (Options a oa, Options b ob, Default OptionalizePP oa ob)
+  =>
+    Default OptionalizePP (Optional a) (Optional b)
+  where
+    def = dimap (\(Optional a) -> a) Optional def
+
+
+------------------------------------------------------------------------------
+instance __OVERLAPPABLE__ (Options b o, Default OptionalizePP a o) =>
+    Default OptionalizePP a (Optional b)
+  where
+    def = let OptionalizePP p = def in OptionalizePP $ Optional . p
+
+
+------------------------------------------------------------------------------
+type Optionalize a b = (Default OptionalizePP a b, a ~ CollectOptional b)
+
+
+------------------------------------------------------------------------------
+optionalize :: Optionalize a b => a -> b
+optionalize = let OptionalizePP p = def in p
 
 
 ------------------------------------------------------------------------------
@@ -1145,90 +1263,3 @@ instance (Functor f, MonadZip f, ProductProfunctor p) =>
   where
     empty = R (rmap return empty)
     R a ***! R b = R (rmap (uncurry mzip) (a ***! b))
-
-
-------------------------------------------------------------------------------
-type Table as = O.Table
-    (Record (MapSndDistributeColumn as))
-    (Record (MapSndCollectOptional (MapSndDistributeColumn as)))
-
-
-------------------------------------------------------------------------------
-class
-    ( Constant (Record as) (Record ws)
-    , Constant (Record bs) (Record rs)
-    , Optionify as bs
-    , Optionify ws rs
-    , Default ColumnMaker (Record rs) (Record rs)
-    )
-  =>
-    TableSpec ws rs as bs | ws -> as rs bs, as -> ws rs bs, rs -> bs, bs -> rs
-
-
-------------------------------------------------------------------------------
-instance TableSpec '[] '[] '[] '[]
-
-
-------------------------------------------------------------------------------
-instance
-    ( Constant a w
-    , Constant b r
-    , Optionify ('(s, a) ': as) ('(s, b) ': bs)
-    , Optionify ('(s, w) ': ws) ('(s, r) ': rs)
-    , Default ColumnMaker r r
-    , KnownSymbol s
-    , TableSpec ws rs as bs
-    , ('(s, b) ': bs) ~ MapSndCollectOptional (MapSndCollectColumn ('(s, w) ': ws))
-    )
-  =>
-    TableSpec ('(s, w) ': ws) ('(s, r) ': rs) ('(s, a) ': as) ('(s, b) ': bs)
-
-
-------------------------------------------------------------------------------
-table :: Properties ws rs
-    => ([String] -> String) -> String -> O.Table ws rs
-table mangler s = O.Table s (properties mangler)
-
-
-------------------------------------------------------------------------------
-tableWithSchema :: Properties ws rs
-    => ([String] -> String) -> String -> String -> O.Table ws rs
-tableWithSchema mangler n s = O.TableWithSchema n s (properties mangler)
-
-
-------------------------------------------------------------------------------
-type family CollectOptional (a :: *) :: * where
-    CollectOptional (Optional a) = a
-    CollectOptional a = a
-
-
-------------------------------------------------------------------------------
-type family MapSndCollectOptional (as :: [(k, *)]) :: [(k, *)] where
-    MapSndCollectOptional '[] = '[]
-    MapSndCollectOptional ('(s, a) ': as) =
-        '(s, CollectOptional a) ': MapSndCollectOptional as
-
-
-------------------------------------------------------------------------------
-class rs ~ MapSndCollectOptional ws => Optionify ws rs where
-    optionify :: Functor f => Product (Labeled f) rs -> Product (Labeled f) ws
-
-
-------------------------------------------------------------------------------
-instance Optionify '[] '[] where
-    optionify Nil = Nil
-
-
-------------------------------------------------------------------------------
-instance (Override a, Optionify ws rs) =>
-    Optionify ('(s, Optional a) ': ws) ('(s, a) ': rs)
-  where
-    optionify (Cons (Labeled a) as) =
-        Cons (Labeled (fmap override a)) (optionify as)
-
-
-------------------------------------------------------------------------------
-instance (CollectOptional a ~ a, Optionify ws rs) =>
-    Optionify ('(s, a) ': ws) ('(s, a) ': rs)
-  where
-    optionify (Cons a as) = Cons a (optionify as)
