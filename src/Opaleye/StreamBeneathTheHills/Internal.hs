@@ -1183,17 +1183,7 @@ type Table as = O.Table
 
 ------------------------------------------------------------------------------
 class
-    ( rs ~ MapSndCollectOptional ws
-    , bs ~ MapSndCollectOptional as
-    , ws ~ MapSndDistributeColumn as
-    , as ~ MapSndCollectColumn ws
-    , rs ~ MapSndDistributeColumn bs
-    , bs ~ MapSndCollectColumn rs
-    , rs ~ MapSndDistributeColumn (MapSndCollectOptional as)
-    , rs ~ MapSndCollectOptional (MapSndDistributeColumn as)
-    , bs ~ MapSndDistributeColumn (MapSndCollectOptional ws)
-    , bs ~ MapSndCollectOptional (MapSndDistributeColumn ws)
-    , Constant (Record as) (Record ws)
+    ( Constant (Record as) (Record ws)
     , Constant (Record bs) (Record rs)
     , Optionify as bs
     , Optionify ws rs
@@ -1209,37 +1199,28 @@ instance TableSpec '[] '[] '[] '[]
 
 ------------------------------------------------------------------------------
 instance
-    ( ('(s, r) ': rs) ~ MapSndCollectOptional ('(s, w) ': ws)
-    , ('(s, b) ': bs) ~ MapSndCollectOptional ('(s, a) ': as)
-    , ('(s, w) ': ws) ~ MapSndDistributeColumn ('(s, a) ': as)
-    , ('(s, a) ': as) ~ MapSndCollectColumn ('(s, w) ': ws)
-    , ('(s, r) ': rs) ~ MapSndDistributeColumn ('(s, b) ': bs)
-    , ('(s, b) ': bs) ~ MapSndCollectColumn ('(s, r) ': rs)
-    , ('(s, r) ': rs) ~ MapSndDistributeColumn (MapSndCollectOptional ('(s, a) ': as))
-    , ('(s, r) ': rs) ~ MapSndCollectOptional (MapSndDistributeColumn ('(s, a) ': as))
-    , ('(s, b) ': bs) ~ MapSndDistributeColumn (MapSndCollectOptional ('(s, w) ': ws))
-    , ('(s, b) ': bs) ~ MapSndCollectOptional (MapSndDistributeColumn ('(s, w) ': ws))
-    , Constant a w
+    ( Constant a w
     , Constant b r
     , Optionify ('(s, a) ': as) ('(s, b) ': bs)
     , Optionify ('(s, w) ': ws) ('(s, r) ': rs)
     , Default ColumnMaker r r
     , KnownSymbol s
     , TableSpec ws rs as bs
+    , ('(s, b) ': bs) ~ MapSndCollectOptional (MapSndCollectColumn ('(s, w) ': ws))
     )
   =>
     TableSpec ('(s, w) ': ws) ('(s, r) ': rs) ('(s, a) ': as) ('(s, b) ': bs)
 
 
 ------------------------------------------------------------------------------
-table :: (TableSpec ws rs as bs, Properties (Record ws) (Record rs))
-    => ([String] -> String) -> String -> Table as
+table :: Properties ws rs
+    => ([String] -> String) -> String -> O.Table ws rs
 table mangler s = O.Table s (properties mangler)
 
 
 ------------------------------------------------------------------------------
-tableWithSchema :: (TableSpec ws rs as bs, Properties (Record ws) (Record rs))
-    => ([String] -> String) -> String -> String -> Table as
+tableWithSchema :: Properties ws rs
+    => ([String] -> String) -> String -> String -> O.Table ws rs
 tableWithSchema mangler n s = O.TableWithSchema n s (properties mangler)
 
 

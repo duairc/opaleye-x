@@ -1,5 +1,4 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
@@ -86,6 +85,7 @@ import           Opaleye.Manipulation
 import           Opaleye.Order (limit)
 import           Opaleye.QueryArr (QueryArr)
 import           Opaleye.RunQuery (runQuery)
+import qualified Opaleye.Table as O (Table)
 
 
 -- opaleye-of-the-stream-beneath-the-hills -----------------------------------
@@ -246,9 +246,9 @@ updateReturning t f p g = Transaction . ReaderT $ \c -> liftE $
 
 
 ------------------------------------------------------------------------------
-delete :: TableSpec ws rs as bs
-    => Table as
-    -> (Record rs -> Column (PG Bool))
+delete
+    :: O.Table ws rs
+    -> (rs -> Column (PG Bool))
     -> Transaction Int64
 delete t f = Transaction . ReaderT $ \c -> liftE $ runDelete c t f
 
