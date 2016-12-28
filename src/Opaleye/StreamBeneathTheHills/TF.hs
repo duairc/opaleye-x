@@ -13,17 +13,17 @@ module Opaleye.StreamBeneathTheHills.TF
     )
 where
 
+-- opaleye -------------------------------------------------------------------
+import           Opaleye.Constant (Constant, constant)
+import           Opaleye.RunQuery (QueryRunner)
+
+
 -- opaleye-of-the-stream-beheath-the-hills -----------------------------------
 import           Opaleye.StreamBeneathTheHills.Internal
-                     ( Columns
-                     , DistributeColumn
-                     , CollectColumn
-                     , Constant
-                     , Run
-                     , PGScalar
-                     , UnPGScalar
-                     , constant
-                     )
+
+
+-- product-profunctors -------------------------------------------------------
+import           Data.Profunctor.Product.Default (Default)
 
 
 ------------------------------------------------------------------------------
@@ -39,11 +39,11 @@ type UnPG p = CollectColumn p
 
 
 ------------------------------------------------------------------------------
-type PGIn a p = Constant a p
+type PGIn a p = (PGRep a p, Default Constant a p)
 
 
 ------------------------------------------------------------------------------
-type PGOut p a = Run a p
+type PGOut p a = (PGRep a p, Default QueryRunner p a)
 
 
 ------------------------------------------------------------------------------

@@ -3,6 +3,7 @@ module Opaleye.StreamBeneathTheHills
     , module Opaleye.StreamBeneathTheHills.Join
     , module Opaleye.StreamBeneathTheHills.Maybe
     , module Opaleye.StreamBeneathTheHills.Order
+    , module Opaleye.StreamBeneathTheHills.Optional
     , module Opaleye.StreamBeneathTheHills.Table
     , module Opaleye.StreamBeneathTheHills.TF
     , module Opaleye.StreamBeneathTheHills.Transaction
@@ -14,6 +15,7 @@ import           Opaleye.StreamBeneathTheHills.Array
 import           Opaleye.StreamBeneathTheHills.Join
 import           Opaleye.StreamBeneathTheHills.Maybe
 import           Opaleye.StreamBeneathTheHills.Order
+import           Opaleye.StreamBeneathTheHills.Optional
 import           Opaleye.StreamBeneathTheHills.Table
 import           Opaleye.StreamBeneathTheHills.TF
 import           Opaleye.StreamBeneathTheHills.Transaction

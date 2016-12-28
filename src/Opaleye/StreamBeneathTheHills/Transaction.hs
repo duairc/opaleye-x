@@ -83,16 +83,12 @@ import           Opaleye.RunQuery (runQuery)
 
 
 -- opaleye-of-the-stream-beneath-the-hills -----------------------------------
-import           Opaleye.StreamBeneathTheHills.TF
-                     ( PGIn
-                     , PGOut
-                     , PG
-                     , pg
+import           Opaleye.StreamBeneathTheHills.Optional
+                     ( Optionalize
+                     , optionalize
                      )
-import           Opaleye.StreamBeneathTheHills.Table
-                     ( Table
-                     , Optionalize, optionalize
-                     )
+import           Opaleye.StreamBeneathTheHills.TF (PGIn, PGOut, PG, pg)
+import           Opaleye.StreamBeneathTheHills.Table (Table)
 
 
 -- postgresql-simple ---------------------------------------------------------

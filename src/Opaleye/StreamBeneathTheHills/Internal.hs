@@ -1,32 +1,10 @@
-{-# LANGUAGE CPP #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DataKinds #-}
-{-# LANGUAGE DeriveDataTypeable #-}
-{-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE DeriveTraversable #-}
-{-# LANGUAGE FlexibleContexts #-}
-{-# LANGUAGE FlexibleInstances #-}
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
-{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
-
-#if __GLASGOW_HASKELL__ < 710
-{-# LANGUAGE IncoherentInstances #-}
-{-# LANGUAGE OverlappingInstances #-}
-#define __OVERLAPS__
-#define __OVERLAPPABLE__
-#define __INCOHERENT__
-#else
-#define __OVERLAPS__ {-# OVERLAPS #-}
-#define __OVERLAPPABLE__ {-# OVERLAPPABLE #-}
-#define __INCOHERENT__ {-# INCOHERENT #-}
-#endif
 
 module Opaleye.StreamBeneathTheHills.Internal where
 
@@ -36,7 +14,7 @@ import           Data.Aeson (Value)
 
 -- anonymous-data ------------------------------------------------------------
 import           Data.Anonymous.Product (Record, Tuple)
-import           Data.Labeled (Field, Labeled (Labeled))
+import           Data.Labeled (Field)
 
 
 -- anonymous-data-product-profunctors ----------------------------------------
@@ -44,29 +22,10 @@ import           Data.Anonymous.Profunctor ()
 
 
 -- base ----------------------------------------------------------------------
-import           Control.Applicative (Alternative, Const)
-#if !MIN_VERSION_base(4, 8, 0)
-import           Control.Applicative (Applicative)
-#endif
-import           Control.Monad (MonadPlus)
+import           Control.Applicative (Const)
 import           Control.Monad.Zip (MonadZip, mzip, munzip)
-#if !MIN_VERSION_base(4, 8, 0)
-import           Data.Foldable (Foldable)
-#endif
 import           Data.Functor.Identity (Identity)
 import           Data.Int (Int16, Int32, Int64)
-#if !MIN_VERSION_base(4, 8, 0)
-import           Data.Monoid (Monoid, mappend, mempty)
-#endif
-import           Data.Proxy (Proxy (Proxy))
-import           Data.Semigroup (Semigroup, (<>))
-#if !MIN_VERSION_base(4, 8, 0)
-import           Data.Traversable (Traversable)
-#endif
-import           Data.Typeable (Typeable)
-import           GHC.Generics (Generic, Generic1)
-import           GHC.TypeLits (KnownSymbol, symbolVal)
-import           Prelude hiding (null)
 
 
 -- bytestring ----------------------------------------------------------------
@@ -78,23 +37,9 @@ import           Data.CaseInsensitive (CI)
 
 
 -- opaleye -------------------------------------------------------------------
-import           Opaleye.Aggregate (Aggregator)
-import qualified Opaleye.Aggregate as O (arrayAgg)
-import           Opaleye.Column
-                     ( Column
-                     , Nullable
-                     , isNull
-                     , null
-                     , toNullable
-                     , unsafeCoerceColumn
-                     )
-import qualified Opaleye.Constant as O (Constant, constant)
-import           Opaleye.Internal.Operators (IfPP)
-import           Opaleye.Operators ((.&&), ifThenElseMany)
-import qualified Opaleye.Operators as O (not)
+import           Opaleye.Column (Column, Nullable)
 import           Opaleye.PGTypes
-                     ( IsSqlType
-                     , PGBool
+                     ( PGBool
                      , PGBytea
                      , PGCitext
                      , PGDate
@@ -109,13 +54,8 @@ import           Opaleye.PGTypes
                      , PGTimestamp
                      , PGTimestamptz
                      , PGUuid
-                     , pgArray
-                     , pgBool
                      )
 import qualified Opaleye.PGTypes as O (PGArray)
-import           Opaleye.RunQuery (QueryRunner)
-import           Opaleye.Table (TableProperties, required, optional)
-import qualified Opaleye.Table as O (Table (Table, TableWithSchema))
 
 
 -- profunctors ---------------------------------------------------------------
@@ -124,7 +64,6 @@ import           Data.Profunctor (Profunctor, dimap, lmap, rmap)
 
 -- product-profunctors -------------------------------------------------------
 import           Data.Profunctor.Product (ProductProfunctor, empty, (***!))
-import           Data.Profunctor.Product.Default (Default, def)
 
 
 -- tagged --------------------------------------------------------------------
@@ -314,56 +253,7 @@ type Columns a p = (DistributeColumn a ~ p, CollectColumn p ~ a)
 
 
 ------------------------------------------------------------------------------
-type Constant a p = (Columns a p, Default O.Constant a p)
-
-
-------------------------------------------------------------------------------
-type Run a p = (Columns a p, Default QueryRunner p a)
-
-
-------------------------------------------------------------------------------
-constant :: Constant a p => a -> p
-constant = O.constant
-
-
-------------------------------------------------------------------------------
 newtype PGArray a = PGArray (DistributePGArray a)
-  deriving (Generic, Typeable)
-
-
-------------------------------------------------------------------------------
-instance (PGArrays a as, PGArrays b bs, Default p as bs, Profunctor p) =>
-    Default p (PGArray a) (PGArray b)
-  where
-    def = dimap (\(PGArray a) -> a) PGArray def
-
-
-------------------------------------------------------------------------------
-instance (Columns a p, Default O.Constant [a] (Column (O.PGArray p))) =>
-    Default (L [] O.Constant) a (Column (O.PGArray p))
-  where
-    def = L def
-
-
-------------------------------------------------------------------------------
-instance (Columns a p, PGArrays p ps, Default (L [] O.Constant) a ps) =>
-    Default O.Constant [a] (PGArray p)
-  where
-    def = let L p = def in rmap PGArray p
-
-
-------------------------------------------------------------------------------
-instance (Columns a p, Default QueryRunner (Column (O.PGArray p)) [a]) =>
-    Default (R [] QueryRunner) (Column (O.PGArray p)) a
-  where
-    def = R def
-
-
-------------------------------------------------------------------------------
-instance (Columns a p, PGArrays p ps, Default (R [] QueryRunner) ps a) =>
-    Default QueryRunner (PGArray p) [a]
-  where
-    def = let R p = def in lmap (\(PGArray a) -> a) p
 
 
 ------------------------------------------------------------------------------
@@ -502,96 +392,7 @@ type PGArrays a as = (DistributePGArray a ~ as, CollectPGArray as ~ a)
 
 
 ------------------------------------------------------------------------------
-instance IsSqlType a => Default (L [] (->)) (Column a) (Column (O.PGArray a))
-  where
-    def = L (pgArray id)
-
-
-------------------------------------------------------------------------------
-type PGFromList a =
-    ( PGArrays a (DistributePGArray a)
-    , Default (L [] (->)) a (DistributePGArray a)
-    )
-
-
-------------------------------------------------------------------------------
-pgFromList :: PGFromList a => [a] -> PGArray a
-pgFromList = let L f = def in PGArray . f
-
-
-------------------------------------------------------------------------------
-newtype ArrayAggPP a b = ArrayAggPP (Aggregator a b)
-  deriving (Profunctor, ProductProfunctor)
-
-
-------------------------------------------------------------------------------
-instance Default ArrayAggPP (Column a) (Column (O.PGArray a)) where
-    def = ArrayAggPP O.arrayAgg
-
-
-------------------------------------------------------------------------------
-type ArrayAgg a =
-    ( PGArrays a (DistributePGArray a)
-    , Default ArrayAggPP a (DistributePGArray a)
-    )
-
-
-------------------------------------------------------------------------------
-arrayAgg :: ArrayAgg a => Aggregator a (PGArray a)
-arrayAgg = let ArrayAggPP p = def in rmap PGArray p
-
-
-------------------------------------------------------------------------------
 newtype PGMaybe a = PGMaybe (DistributeNullable a)
-  deriving (Generic, Typeable)
-
-
-------------------------------------------------------------------------------
-instance (PGJust a, PGMatchMaybe a (PGMaybe a)) => Semigroup (PGMaybe a) where
-    a <> b = pgMatchMaybe b pgJust a
-
-
-------------------------------------------------------------------------------
-instance (PGNothing a, PGJust a, PGMatchMaybe a (PGMaybe a)) =>
-    Monoid (PGMaybe a)
-  where
-    mempty = pgNothing
-    mappend a b = pgMatchMaybe b pgJust a
-
-
-------------------------------------------------------------------------------
-instance (Nullables a as, Nullables b bs, Default p as bs, Profunctor p) =>
-    Default p (PGMaybe a) (PGMaybe b)
-  where
-    def = dimap (\(PGMaybe a) -> a) PGMaybe def
-
-
-------------------------------------------------------------------------------
-instance (Columns a p, Default O.Constant (Maybe a) (Column (Nullable p))) =>
-    Default (L Maybe O.Constant) a (Column (Nullable p))
-  where
-    def = L def
-
-
-------------------------------------------------------------------------------
-instance (Columns a p, Nullables p ps, Default (L Maybe O.Constant) a ps) =>
-    Default O.Constant (Maybe a) (PGMaybe p)
-  where
-    def = let L p = def in rmap PGMaybe p
-
-
-------------------------------------------------------------------------------
-instance (Columns a p, Default QueryRunner (Column (Nullable p)) (Maybe a)) =>
-    Default (R Maybe QueryRunner) (Column (Nullable p)) a
-  where
-    def = R def
-
-
-------------------------------------------------------------------------------
-instance (Columns a p, Nullables p ps, Default (R Maybe QueryRunner) ps a) =>
-    Default QueryRunner (PGMaybe p) (Maybe a)
-  where
-    def = let R p = def in lmap (\(PGMaybe a) -> a) p
 
 
 ------------------------------------------------------------------------------
@@ -729,154 +530,7 @@ type Nullables a b = (DistributeNullable a ~ b, CollectNullable b ~ a)
 
 
 ------------------------------------------------------------------------------
-newtype NothingPP a b = NothingPP b
-
-
-------------------------------------------------------------------------------
-instance Profunctor NothingPP where
-    dimap _ r (NothingPP p) = NothingPP (r p)
-
-
-------------------------------------------------------------------------------
-instance ProductProfunctor NothingPP where
-    empty = NothingPP ()
-    NothingPP a ***! NothingPP b = NothingPP (a, b)
-
-
-------------------------------------------------------------------------------
-instance Default NothingPP (Column (Nullable a)) (Column (Nullable a)) where
-    def = NothingPP null
-
-
-------------------------------------------------------------------------------
-type PGNothing a =
-    ( Nullables a (DistributeNullable a)
-    , Default NothingPP (DistributeNullable a) (DistributeNullable a)
-    )
-
-
-------------------------------------------------------------------------------
-pgNothing :: forall a. PGNothing a => PGMaybe a
-pgNothing = let NothingPP n = p in PGMaybe n
-  where
-    p = def :: NothingPP (DistributeNullable a) (DistributeNullable a)
-
-
-------------------------------------------------------------------------------
-newtype JustPP a b = JustPP (a -> b)
-  deriving (Profunctor, ProductProfunctor)
-
-
-------------------------------------------------------------------------------
-instance Default JustPP (Column a) (Column (Nullable a)) where
-    def = JustPP toNullable
-
-
-------------------------------------------------------------------------------
-type PGJust a =
-    ( Nullables a (DistributeNullable a)
-    , Default JustPP a (DistributeNullable a)
-    )
-
-
-------------------------------------------------------------------------------
-pgJust :: PGJust a => a -> PGMaybe a
-pgJust = let JustPP f = def in PGMaybe . f
-
-
-------------------------------------------------------------------------------
-newtype FromJustPP a b = FromJustPP (a -> b)
-  deriving (Profunctor, ProductProfunctor)
-
-
-------------------------------------------------------------------------------
-instance Default FromJustPP (Column (Nullable a)) (Column a) where
-    def = FromJustPP unsafeCoerceColumn
-
-
-------------------------------------------------------------------------------
-pgFromJust :: (Nullables a b, Default FromJustPP b a) => PGMaybe a -> a
-pgFromJust = let FromJustPP f = def in f . (\(PGMaybe a) -> a)
-
-
-------------------------------------------------------------------------------
-newtype IsJustPP a b = IsJustPP (a -> Column PGBool)
-
-
-------------------------------------------------------------------------------
-instance Profunctor IsJustPP where
-    dimap l _ (IsJustPP p) = IsJustPP (lmap l p)
-
-
-------------------------------------------------------------------------------
-instance ProductProfunctor IsJustPP where
-    empty = IsJustPP (const (pgBool True))
-    IsJustPP a ***! IsJustPP b = IsJustPP (rmap (uncurry (.&&)) (a ***! b))
-
-
-------------------------------------------------------------------------------
-instance Default IsJustPP (Column (Nullable a)) (Column (Nullable a)) where
-    def = IsJustPP (O.not . isNull)
-
-
-------------------------------------------------------------------------------
-type PGIsJust a =
-    ( Nullables a (DistributeNullable a)
-    , Default IsJustPP (DistributeNullable a) (DistributeNullable a)
-    )
-
-
-------------------------------------------------------------------------------
-pgIsJust :: forall a. PGIsJust a => PGMaybe a -> Column PGBool
-pgIsJust (PGMaybe a) = let IsJustPP f = p in f a
-  where
-    p = def :: IsJustPP (DistributeNullable a) (DistributeNullable a)
-
-
-------------------------------------------------------------------------------
-pgIsNothing :: PGIsJust a => PGMaybe a -> Column PGBool
-pgIsNothing = O.not . pgIsJust
-
-
-------------------------------------------------------------------------------
-type PGMatchMaybe a b =
-    ( Nullables a (DistributeNullable a)
-    , PGIsJust a
-    , Default FromJustPP (DistributeNullable a) a
-    , Default IfPP b b
-    )
-
-
-------------------------------------------------------------------------------
-pgMatchMaybe :: PGMatchMaybe a b => b -> (a -> b) -> PGMaybe a -> b
-pgMatchMaybe b f a = ifThenElseMany (pgIsNothing a) b (f (pgFromJust a))
-
-
-------------------------------------------------------------------------------
-newtype Option a = Option (Maybe a) deriving
-    ( Functor, Foldable, Traversable, Applicative, Monad, Alternative
-    , MonadPlus, Eq, Ord, Read, Show, Typeable, Generic, Generic1, Monoid
-    , Semigroup
-    )
-
-
-------------------------------------------------------------------------------
-instance (Default p (Maybe a) (Maybe b), Profunctor p) =>
-    Default p (Option a) (Option b)
-  where
-    def = dimap (\(Option a) -> a) Option def
-
-
-------------------------------------------------------------------------------
-newtype Optional a = Optional (DistributeOption a)
-  deriving (Generic, Typeable)
-
-
-------------------------------------------------------------------------------
-instance (Options a oa, Options b ob, Default p oa ob, Profunctor p) =>
-    Default p (Optional a) (Optional b)
-  where
-    def = dimap (\(Optional a) -> a) Optional def
+newtype Option a = Option (Maybe a)
 
 
 ------------------------------------------------------------------------------
@@ -1006,131 +660,11 @@ type family MapSndCollectOption (as :: [(k, *)]) :: [(k, *)] where
 
 
 ------------------------------------------------------------------------------
-type Options a p = (DistributeOption a ~ p, CollectOption p ~ a)
+type Options a b = (DistributeOption a ~ b, CollectOption b ~ a)
 
 
 ------------------------------------------------------------------------------
-instance Default (R Maybe (->)) (Option a) a where
-    def = R (\(Option a) -> a)
-
-
-------------------------------------------------------------------------------
-type MatchOptional a =
-    ( Options a (DistributeOption a)
-    , Default (R Maybe (->)) (DistributeOption a) a
-    )
-
-
-------------------------------------------------------------------------------
-matchOptional :: MatchOptional a => b -> (a -> b) -> Optional a -> b
-matchOptional b f (Optional a) = let R p = def in maybe b f (p a)
-
-
-------------------------------------------------------------------------------
-instance Default NothingPP (Option a) (Option a) where
-    def = NothingPP (Option Nothing)
-
-
-------------------------------------------------------------------------------
-type Defaults a =
-    ( Options a (DistributeOption a)
-    , Default NothingPP (DistributeOption a) (DistributeOption a)
-    )
-
-
-------------------------------------------------------------------------------
-defaults :: forall a. Defaults a => Optional a
-defaults = let NothingPP n = p in Optional n
-  where
-    p = def :: NothingPP (DistributeOption a) (DistributeOption a)
-
-
-------------------------------------------------------------------------------
-instance Default JustPP a (Option a) where
-    def = JustPP (Option . Just)
-
-
-------------------------------------------------------------------------------
-type Override a =
-    ( Options a (DistributeOption a)
-    , Default JustPP a (DistributeOption a)
-    )
-
-
-------------------------------------------------------------------------------
-override :: Override a => a -> Optional a
-override = let JustPP f = def in Optional . f
-
-
-------------------------------------------------------------------------------
-newtype PropertiesPP a b =
-    PropertiesPP ([String] -> ([String] -> String) -> TableProperties a b)
-
-
-------------------------------------------------------------------------------
-instance Profunctor PropertiesPP where
-    dimap l r (PropertiesPP p) = PropertiesPP $ \ns f -> dimap l r (p ns f)
-
-
-------------------------------------------------------------------------------
-instance ProductProfunctor PropertiesPP where
-    empty = PropertiesPP $ \_ _ -> empty
-    PropertiesPP a ***! PropertiesPP b =
-        PropertiesPP $ \ns f -> a ns f ***! b ns f
-
-
-------------------------------------------------------------------------------
-instance Default PropertiesPP (Column a) (Column a) where
-    def = PropertiesPP $ \ns f -> required (f ns)
-
-
-------------------------------------------------------------------------------
-instance Default PropertiesPP (Option (Column a)) (Column a) where
-    def = PropertiesPP $ \ns f -> lmap (\(Option a) -> a) (optional (f ns))
-
-
-------------------------------------------------------------------------------
-instance (Options a o, Default PropertiesPP o b) =>
-    Default PropertiesPP (Optional a) b
-  where
-    def = let PropertiesPP p = def in PropertiesPP $ \ns f ->
-        lmap (\(Optional a) -> a) (p ns f)
-
-
-------------------------------------------------------------------------------
-instance __OVERLAPS__ (Default PropertiesPP (f a) (f b), KnownSymbol s) =>
-    Default PropertiesPP (Labeled f '(s, a)) (Labeled f '(s, b))
-  where
-    def = let PropertiesPP p = def in PropertiesPP $ \ns ->
-        dimap unlabel Labeled . p (ns ++ [symbolVal (Proxy :: Proxy s)])
-      where
-        unlabel :: Labeled f '(s, a) -> f a
-        unlabel (Labeled a) = a
-
-
-------------------------------------------------------------------------------
-type Properties = Default PropertiesPP
-
-
-------------------------------------------------------------------------------
-properties :: Properties a b => ([String] -> String) -> TableProperties a b
-properties = let PropertiesPP p = def in p []
-
-
-------------------------------------------------------------------------------
-type Table ws = O.Table ws (CollectOptional ws)
-
-
-------------------------------------------------------------------------------
-table :: (Properties ws rs, Optionalize rs ws)
-    => ([String] -> String) -> String -> Table ws
-table mangler s = O.Table s (properties mangler)
-
-
-------------------------------------------------------------------------------
-tableWithSchema :: (Properties ws rs, Optionalize rs ws)
-    => ([String] -> String) -> String -> String -> Table ws
-tableWithSchema mangler n s = O.TableWithSchema n s (properties mangler)
+newtype Optional a = Optional (DistributeOption a)
 
 
 ------------------------------------------------------------------------------
@@ -1201,43 +735,7 @@ type family MapSndCollectOptional (as :: [(k, *)]) :: [(k, *)] where
 
 
 ------------------------------------------------------------------------------
-newtype OptionalizePP a b = OptionalizePP (a -> b)
-  deriving (Profunctor, ProductProfunctor)
-
-
-------------------------------------------------------------------------------
-instance __INCOHERENT__ Default OptionalizePP a a where
-    def = OptionalizePP id
-
-
-------------------------------------------------------------------------------
-instance Default OptionalizePP a (Option a) where
-    def = OptionalizePP (Option . Just)
-
-
-------------------------------------------------------------------------------
-instance __OVERLAPS__
-    (Options a oa, Options b ob, Default OptionalizePP oa ob)
-  =>
-    Default OptionalizePP (Optional a) (Optional b)
-  where
-    def = dimap (\(Optional a) -> a) Optional def
-
-
-------------------------------------------------------------------------------
-instance __OVERLAPPABLE__ (Options b o, Default OptionalizePP a o) =>
-    Default OptionalizePP a (Optional b)
-  where
-    def = let OptionalizePP p = def in OptionalizePP $ Optional . p
-
-
-------------------------------------------------------------------------------
-type Optionalize a b = (Default OptionalizePP a b, a ~ CollectOptional b)
-
-
-------------------------------------------------------------------------------
-optionalize :: Optionalize a b => a -> b
-optionalize = let OptionalizePP p = def in p
+type Optionals a b = a ~ CollectOptional b
 
 
 ------------------------------------------------------------------------------

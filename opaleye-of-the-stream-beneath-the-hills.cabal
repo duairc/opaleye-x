@@ -19,11 +19,15 @@ library
   hs-source-dirs:
     src
 
+  include-dirs:
+    include
+
   exposed-modules:
     Opaleye.StreamBeneathTheHills
     Opaleye.StreamBeneathTheHills.Array
     Opaleye.StreamBeneathTheHills.Join
     Opaleye.StreamBeneathTheHills.Maybe
+    Opaleye.StreamBeneathTheHills.Optional
     Opaleye.StreamBeneathTheHills.Order
     Opaleye.StreamBeneathTheHills.Table
     Opaleye.StreamBeneathTheHills.TF
@@ -52,7 +56,7 @@ library
     uuid-types >= 1 && < 2
 
   if impl(ghc < 7.10)
-    build-depends: transformers >= 0.2 && < 0.6
+    build-depends: transformers >= 0.4 && < 0.6
 
   if impl(ghc < 8)
     build-depends: semigroups >= 0.1
