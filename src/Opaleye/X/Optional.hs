@@ -22,6 +22,7 @@ module Opaleye.X.Optional
     , Defaults, defaults
     , Override, override
     , Optionalize, optionalize
+    , Deoptionalize
     )
 where
 
@@ -209,3 +210,7 @@ type Optionalize a b = (Optionals a b, Default OptionalizePP a b)
 ------------------------------------------------------------------------------
 optionalize :: Optionalize a b => a -> b
 optionalize = let OptionalizePP p = def in p
+
+
+------------------------------------------------------------------------------
+type Deoptionalize a = CollectOptional a
