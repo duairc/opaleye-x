@@ -41,15 +41,15 @@ import           Opaleye.Column
                      , toNullable
                      , unsafeCoerceColumn
                      )
-import           Opaleye.Constant (Constant)
+import           Opaleye.Constant (Constant, constant)
 import           Opaleye.Internal.Operators (IfPP)
+import           Opaleye.PGTypes (PGBool)
 import           Opaleye.Operators ((.&&), ifThenElseMany, not)
 import           Opaleye.RunQuery (QueryRunner)
 
 
 -- opaleye-x -----------------------------------------------------------------
 import           Opaleye.X.Internal
-import           Opaleye.X.TF (PG, pg)
 
 
 -- profunctors ---------------------------------------------------------------
@@ -187,7 +187,7 @@ pgFromJust = let FromJustPP f = def in f . (\(PGMaybe a) -> a)
 
 
 ------------------------------------------------------------------------------
-newtype IsJustPP a b = IsJustPP (a -> PG Bool)
+newtype IsJustPP a b = IsJustPP (a -> Column PGBool)
 
 
 ------------------------------------------------------------------------------
@@ -197,7 +197,7 @@ instance Profunctor IsJustPP where
 
 ------------------------------------------------------------------------------
 instance ProductProfunctor IsJustPP where
-    empty = IsJustPP (const (pg True))
+    empty = IsJustPP (const (constant True))
     IsJustPP a ***! IsJustPP b = IsJustPP (rmap (uncurry (.&&)) (a ***! b))
 
 
@@ -214,14 +214,14 @@ type PGIsJust a =
 
 
 ------------------------------------------------------------------------------
-pgIsJust :: forall a. PGIsJust a => PGMaybe a -> PG Bool
+pgIsJust :: forall a. PGIsJust a => PGMaybe a -> Column PGBool
 pgIsJust (PGMaybe a) = let IsJustPP f = p in f a
   where
     p = def :: IsJustPP (DistributeNullable a) (DistributeNullable a)
 
 
 ------------------------------------------------------------------------------
-pgIsNothing :: PGIsJust a => PGMaybe a -> PG Bool
+pgIsNothing :: PGIsJust a => PGMaybe a -> Column PGBool
 pgIsNothing = not . pgIsJust
 
 

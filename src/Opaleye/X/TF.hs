@@ -20,6 +20,9 @@ import           Opaleye.RunQuery (QueryRunner)
 
 -- opaleye-x -----------------------------------------------------------------
 import           Opaleye.X.Internal
+import           Opaleye.X.Array ()
+import           Opaleye.X.Maybe ()
+import           Opaleye.X.Optional ()
 
 
 -- product-profunctors -------------------------------------------------------
