@@ -1,5 +1,6 @@
 module Opaleye.X
-    ( module Opaleye.X.Array
+    ( module Opaleye.X.Aggregate
+    , module Opaleye.X.Array
     , module Opaleye.X.Join
     , module Opaleye.X.Maybe
     , module Opaleye.X.Order
@@ -11,6 +12,7 @@ module Opaleye.X
 where
 
 -- opaleye-x -----------------------------------------------------------------
+import           Opaleye.X.Aggregate
 import           Opaleye.X.Array
 import           Opaleye.X.Join
 import           Opaleye.X.Maybe

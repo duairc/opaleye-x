@@ -25,6 +25,7 @@ import           Opaleye.X.Maybe
                      , PGJust, pgJust
                      , PGNothing, pgNothing
                      )
+import           Opaleye.X.TF ()
 
 
 -- product-profunctors -------------------------------------------------------

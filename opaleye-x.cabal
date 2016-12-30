@@ -24,6 +24,7 @@ library
 
   exposed-modules:
     Opaleye.X
+    Opaleye.X.Aggregate
     Opaleye.X.Array
     Opaleye.X.Join
     Opaleye.X.Maybe

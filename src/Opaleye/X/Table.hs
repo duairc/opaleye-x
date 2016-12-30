@@ -6,6 +6,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -34,7 +35,7 @@ import qualified Opaleye.Table as O (Table (Table, TableWithSchema))
 
 -- opaleye-x -----------------------------------------------------------------
 import           Opaleye.X.Internal
-import           Opaleye.X.Optional ()
+import           Opaleye.X.TF ()
 
 
 -- profunctors ---------------------------------------------------------------
