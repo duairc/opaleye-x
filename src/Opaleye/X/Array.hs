@@ -60,28 +60,28 @@ instance (PGArrays a as, PGArrays b bs, Default p as bs, Profunctor p) =>
 
 
 ------------------------------------------------------------------------------
-instance (Columns a p, Default Constant [a] (Column (O.PGArray p))) =>
+instance (Default Constant [a] (Column (O.PGArray p))) =>
     Default (L [] Constant) a (Column (O.PGArray p))
   where
     def = L def
 
 
 ------------------------------------------------------------------------------
-instance (Columns a p, PGArrays p ps, Default (L [] Constant) a ps) =>
+instance (PGArrays p ps, Default (L [] Constant) a ps) =>
     Default Constant [a] (PGArray p)
   where
     def = let L p = def in rmap PGArray p
 
 
 ------------------------------------------------------------------------------
-instance (Columns a p, Default QueryRunner (Column (O.PGArray p)) [a]) =>
+instance (Default QueryRunner (Column (O.PGArray p)) [a]) =>
     Default (R [] QueryRunner) (Column (O.PGArray p)) a
   where
     def = R def
 
 
 ------------------------------------------------------------------------------
-instance (Columns a p, PGArrays p ps, Default (R [] QueryRunner) ps a) =>
+instance (PGArrays p ps, Default (R [] QueryRunner) ps a) =>
     Default QueryRunner (PGArray p) [a]
   where
     def = let R p = def in lmap (\(PGArray a) -> a) p

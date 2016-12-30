@@ -75,28 +75,28 @@ instance (Nullables a as, Nullables b bs, Default p as bs, Profunctor p) =>
 
 
 ------------------------------------------------------------------------------
-instance (Columns a p, Default Constant (Maybe a) (Column (Nullable p))) =>
+instance (Default Constant (Maybe a) (Column (Nullable p))) =>
     Default (L Maybe Constant) a (Column (Nullable p))
   where
     def = L def
 
 
 ------------------------------------------------------------------------------
-instance (Columns a p, Nullables p ps, Default (L Maybe Constant) a ps) =>
+instance (Nullables p ps, Default (L Maybe Constant) a ps) =>
     Default Constant (Maybe a) (PGMaybe p)
   where
     def = let L p = def in rmap PGMaybe p
 
 
 ------------------------------------------------------------------------------
-instance (Columns a p, Default QueryRunner (Column (Nullable p)) (Maybe a)) =>
+instance (Default QueryRunner (Column (Nullable p)) (Maybe a)) =>
     Default (R Maybe QueryRunner) (Column (Nullable p)) a
   where
     def = R def
 
 
 ------------------------------------------------------------------------------
-instance (Columns a p, Nullables p ps, Default (R Maybe QueryRunner) ps a) =>
+instance (Nullables p ps, Default (R Maybe QueryRunner) ps a) =>
     Default QueryRunner (PGMaybe p) (Maybe a)
   where
     def = let R p = def in lmap (\(PGMaybe a) -> a) p
