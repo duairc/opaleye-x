@@ -110,9 +110,10 @@ instance __OVERLAPS__ (Default PropertiesPP (f a) (f b), KnownSymbol s) =>
 
 
 ------------------------------------------------------------------------------
-type Properties = Default PropertiesPP
+type Properties a = Default PropertiesPP a (CollectOptional a)
 
 
 ------------------------------------------------------------------------------
-properties :: Properties a b => ([String] -> String) -> TableProperties a b
+properties :: Properties a
+    => ([String] -> String) -> TableProperties a (CollectOptional a)
 properties = let PropertiesPP p = def in p []
