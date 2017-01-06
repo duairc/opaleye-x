@@ -36,7 +36,7 @@ import           Control.Monad (MonadPlus)
 import           Data.Foldable (Foldable)
 #endif
 #if !MIN_VERSION_base(4, 8, 0)
-import           Control.Traversable (Traversable)
+import           Data.Traversable (Traversable)
 #endif
 #if !MIN_VERSION_base(4, 8, 0)
 import           Data.Monoid (Monoid)
