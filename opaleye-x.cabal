@@ -54,6 +54,7 @@ library
     text >= 0.1 && < 2,
     transformers >= 0.2 && < 0.6,
     time >= 1 && < 2,
+    types >= 0.1 && < 0.2,
     uuid-types >= 1 && < 2
 
   if impl(ghc < 7.10)

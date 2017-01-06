@@ -23,12 +23,12 @@ import           Data.Labeled (Labeled (Labeled))
 
 
 -- base ----------------------------------------------------------------------
-import           GHC.TypeLits (KnownSymbol, symbolVal)
 import           Data.Proxy (Proxy (Proxy))
 
 
 -- opaleye -------------------------------------------------------------------
 import           Opaleye.Column (Column)
+import           Opaleye.Internal.TableMaker (ColumnMaker)
 import           Opaleye.Table (TableProperties, optional, required)
 import qualified Opaleye.Table as O (Table (Table, TableWithSchema))
 
@@ -47,19 +47,22 @@ import           Data.Profunctor.Product (ProductProfunctor, (***!), empty)
 import           Data.Profunctor.Product.Default (Default, def)
 
 
-------------------------------------------------------------------------------
-type Table ws = O.Table ws (CollectOptional ws)
+-- types ---------------------------------------------------------------------
+import           Type.Meta (Known, Val, val)
 
 
 ------------------------------------------------------------------------------
-table :: (Properties ws rs, Optionals rs ws)
-    => ([String] -> String) -> String -> Table ws
+type Table a = O.Table a (CollectOptional a)
+
+
+------------------------------------------------------------------------------
+table :: Properties a => ([String] -> String) -> String -> Table a
 table mangler s = O.Table s (properties mangler)
 
 
 ------------------------------------------------------------------------------
-tableWithSchema :: (Properties ws rs, Optionals rs ws)
-    => ([String] -> String) -> String -> String -> Table ws
+tableWithSchema :: Properties a
+    => ([String] -> String) -> String -> String -> Table a
 tableWithSchema mangler n s = O.TableWithSchema n s (properties mangler)
 
 
@@ -99,18 +102,38 @@ instance (Options a o, Default PropertiesPP o b) =>
 
 
 ------------------------------------------------------------------------------
-instance __OVERLAPS__ (Default PropertiesPP (f a) (f b), KnownSymbol s) =>
+instance __OVERLAPS__
+    (Default PropertiesPP (f a) (f b), Known s, ShowVal (Val s))
+  =>
     Default PropertiesPP (Labeled f '(s, a)) (Labeled f '(s, b))
   where
     def = let PropertiesPP p = def in PropertiesPP $ \ns ->
-        dimap unlabel Labeled . p (ns ++ [symbolVal (Proxy :: Proxy s)])
+        dimap unlabel Labeled . p (ns ++ [showVal (val (Proxy :: Proxy s))])
       where
         unlabel :: Labeled f '(s, a) -> f a
         unlabel (Labeled a) = a
 
 
 ------------------------------------------------------------------------------
-type Properties a = Default PropertiesPP a (CollectOptional a)
+class ShowVal a where
+    showVal :: a -> String
+
+
+------------------------------------------------------------------------------
+instance ShowVal String where
+    showVal = id
+
+
+------------------------------------------------------------------------------
+instance __OVERLAPPABLE__ Show a => ShowVal a where
+    showVal = show
+
+
+------------------------------------------------------------------------------
+type Properties a =
+    ( Default PropertiesPP a (CollectOptional a)
+    , Default ColumnMaker (CollectOptional a) (CollectOptional a)
+    )
 
 
 ------------------------------------------------------------------------------
