@@ -477,11 +477,12 @@ type family CollectNullable a :: * where
         )
     CollectNullable (a, b, c, d, e, f) =
         ( CollectNullable a, CollectNullable b, CollectNullable c
-        , CollectNullable d, CollectNullable e
+        , CollectNullable d, CollectNullable e, CollectNullable f
         )
     CollectNullable (a, b, c, d, e, f, g) =
         ( CollectNullable a, CollectNullable b, CollectNullable c
-        , CollectNullable d, CollectNullable e
+        , CollectNullable d, CollectNullable e, CollectNullable f
+        , CollectNullable g
         )
     CollectNullable (a, b, c, d, e, f, g, h) =
         ( CollectNullable a, CollectNullable b, CollectNullable c

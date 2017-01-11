@@ -80,7 +80,7 @@ deriving instance Typeable Option
 
 
 ------------------------------------------------------------------------------
-instance (Default p (Maybe a) (Maybe b), Profunctor p) =>
+instance __OVERLAPPABLE__ (Default p (Maybe a) (Maybe b), Profunctor p) =>
     Default p (Option a) (Option b)
   where
     def = dimap (\(Option a) -> a) Option def
