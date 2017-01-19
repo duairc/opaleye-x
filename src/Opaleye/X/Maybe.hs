@@ -19,6 +19,7 @@ module Opaleye.X.Maybe
     , PGNothing, pgNothing
     , PGJust, pgJust
     , PGIsJust, pgIsJust, pgIsNothing
+    , PGFromJust, pgFromJust
     )
 where
 
@@ -182,7 +183,14 @@ instance Default FromJustPP (Column (Nullable a)) (Column a) where
 
 
 ------------------------------------------------------------------------------
-pgFromJust :: (Nullables a b, Default FromJustPP b a) => PGMaybe a -> a
+type PGFromJust a =
+    ( Nullables a (DistributeNullable a)
+    , Default FromJustPP (DistributeNullable a) a
+    )
+
+
+------------------------------------------------------------------------------
+pgFromJust :: PGFromJust a => PGMaybe a -> a
 pgFromJust = let FromJustPP f = def in f . (\(PGMaybe a) -> a)
 
 
