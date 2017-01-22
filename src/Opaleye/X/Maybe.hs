@@ -24,6 +24,7 @@ module Opaleye.X.Maybe
 where
 
 -- base ----------------------------------------------------------------------
+import           Control.Monad (join)
 import           Data.Typeable (Typeable)
 #if !MIN_VERSION_base(4, 8, 0)
 import           Data.Monoid (Monoid, mempty, mappend)
@@ -83,6 +84,13 @@ instance (Default Constant (Maybe a) (Column (Nullable p))) =>
 
 
 ------------------------------------------------------------------------------
+instance (Default Constant (Maybe a) (PGMaybe p)) =>
+    Default (L Maybe Constant) (Maybe a) (PGMaybe p)
+  where
+    def = L (lmap join def)
+
+
+------------------------------------------------------------------------------
 instance (Nullables p ps, Default (L Maybe Constant) a ps) =>
     Default Constant (Maybe a) (PGMaybe p)
   where
@@ -94,6 +102,13 @@ instance (Default QueryRunner (Column (Nullable p)) (Maybe a)) =>
     Default (R Maybe QueryRunner) (Column (Nullable p)) a
   where
     def = R def
+
+
+------------------------------------------------------------------------------
+instance (Default QueryRunner (PGMaybe p) (Maybe a)) =>
+    Default (R Maybe QueryRunner) (PGMaybe p) (Maybe a)
+  where
+    def = R (rmap (fmap Just) def)
 
 
 ------------------------------------------------------------------------------
@@ -161,6 +176,11 @@ instance Default JustPP (Column a) (Column (Nullable a)) where
 
 
 ------------------------------------------------------------------------------
+instance Default JustPP (Column (Nullable a)) (Column (Nullable a)) where
+    def = JustPP id
+
+
+------------------------------------------------------------------------------
 type PGJust a =
     ( Nullables a (DistributeNullable a)
     , Default JustPP a (DistributeNullable a)
@@ -180,6 +200,11 @@ newtype FromJustPP a b = FromJustPP (a -> b)
 ------------------------------------------------------------------------------
 instance Default FromJustPP (Column (Nullable a)) (Column a) where
     def = FromJustPP unsafeCoerceColumn
+
+
+------------------------------------------------------------------------------
+instance Default FromJustPP (Column (Nullable a)) (Column (Nullable a)) where
+    def = FromJustPP id
 
 
 ------------------------------------------------------------------------------
