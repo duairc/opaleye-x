@@ -3,13 +3,11 @@
 {-# LANGUAGE TypeFamilies #-}
 
 module Opaleye.X.TF
-    ( PG, pg
-    , UnPG
-    , PGRep
-    , PGIn
-    , PGOut
-    , PGScalar
-    , UnPGScalar
+    ( PGRep, PG, UnPG, pg
+    , NullRep, Null, UnNull
+    , ArrayRep, Array, UnArray
+    , PGIn, PGOut
+    , PGScalar, UnPGScalar
     )
 where
 
@@ -39,6 +37,30 @@ type PG a = DistributeColumn a
 
 ------------------------------------------------------------------------------
 type UnPG p = CollectColumn p
+
+
+------------------------------------------------------------------------------
+type NullRep a p = Nullables a p
+
+
+------------------------------------------------------------------------------
+type Null a = DistributeNullable a
+
+
+------------------------------------------------------------------------------
+type UnNull p = CollectNullable p
+
+
+------------------------------------------------------------------------------
+type ArrayRep a p = PGArrays a p
+
+
+------------------------------------------------------------------------------
+type Array a = DistributePGArray a
+
+
+------------------------------------------------------------------------------
+type UnArray p = CollectPGArray p
 
 
 ------------------------------------------------------------------------------
