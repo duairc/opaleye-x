@@ -64,9 +64,11 @@ import           Control.Monad.Lift.Base (MonadBase)
 import           Control.Monad.Lift.IO (MonadIO, liftIO)
 import           Monad.Abort (MonadAbort)
 import           Monad.Catch (catch, try)
+import           Monad.Mask (mask)
 import           Monad.Reader (MonadReader, ask)
 import           Monad.Recover (MonadRecover, recover)
 import           Monad.Throw (throw)
+import           Monad.Try (onException)
 
 
 -- opaleye -------------------------------------------------------------------
@@ -93,6 +95,12 @@ import           Database.PostgreSQL.Simple
                      ( Connection
                      , SqlError
                      , withTransaction
+                     )
+import           Database.PostgreSQL.Simple.Transaction
+                     ( isFailedTransactionError
+                     , newSavepoint
+                     , releaseSavepoint
+                     , rollbackToAndReleaseSavepoint
                      )
 
 
@@ -128,7 +136,7 @@ newtype Transaction a =
     Transaction (ReaderT Connection (ExceptT SomeException IO) a)
   deriving
     ( Functor, Applicative, MonadFix, Typeable, Generic, Generic1
-    , MonadAbort SomeException, MonadRecover SomeException
+    , MonadAbort SomeException
     )
 
 
@@ -157,6 +165,30 @@ instance Alternative Transaction where
 instance MonadPlus Transaction where
     mzero = empty
     mplus = (<|>)
+
+
+------------------------------------------------------------------------------
+instance MonadRecover SomeException Transaction where
+    recover (Transaction (ReaderT m)) handler =
+        Transaction $ ReaderT $ \connection -> ExceptT $ mask $ \restore -> do
+            savepoint <- newSavepoint connection
+            e <- restore (let ExceptT m' = m connection in m') `onException`
+                rollbackToAndReleaseSavepoint connection savepoint
+            case e of
+                Left x -> do
+                    rollbackToAndReleaseSavepoint connection savepoint
+                    let Transaction (ReaderT m') = handler x
+                    let ExceptT m'' = m' connection
+                    m''
+                Right a -> do
+                    releaseSavepoint connection savepoint `catch` \x ->
+                        if isFailedTransactionError x
+                            then do
+                                rollbackToAndReleaseSavepoint
+                                    connection
+                                    savepoint
+                            else throw x
+                    pure (Right a)
 
 
 ------------------------------------------------------------------------------
@@ -227,6 +259,21 @@ updateReturning :: (Optionalize rs ws, PGOut p a)
 updateReturning t f p g = Transaction . ReaderT $ \c -> liftE $
     runUpdateReturning c t (f . optionalize) p g
 
+{-
+------------------------------------------------------------------------------
+upsert :: PGIn as ws => Table ws -> [as] -> (ws -> ws) -> Transaction Int64
+upsert = undefined
+
+
+------------------------------------------------------------------------------
+upsertReturning :: (PGIn as ws, Optionalize rs ws, PGOut p a)
+    => Table ws
+    -> [as]
+    -> (ws -> ws)
+    -> (rs -> p)
+    -> Transaction [a]
+upsertReturning = undefined
+-}
 
 ------------------------------------------------------------------------------
 delete
