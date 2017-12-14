@@ -47,7 +47,7 @@ instance Default GroupByPP (Column a) (Column a) where
 
 
 ------------------------------------------------------------------------------
-type GroupBy a b = Default GroupByPP a b
+type GroupBy = Default GroupByPP
 
 
 ------------------------------------------------------------------------------

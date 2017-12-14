@@ -39,6 +39,11 @@ instance Default CastPP (Column a) (Column b) where
 
 
 ------------------------------------------------------------------------------
+instance Default CastPP a b => Default CastPP (Maybe a) (Maybe b) where
+    def = let CastPP p = def in CastPP (fmap p)
+
+
+------------------------------------------------------------------------------
 type Cast = Default CastPP
 
 

@@ -28,9 +28,8 @@ import           Data.Proxy (Proxy (Proxy))
 
 -- opaleye -------------------------------------------------------------------
 import           Opaleye.Column (Column)
-import           Opaleye.Internal.TableMaker (ColumnMaker)
-import           Opaleye.Table (TableProperties, optional, required)
-import qualified Opaleye.Table as O (Table (Table, TableWithSchema))
+import           Opaleye.Table (TableColumns, optional, required)
+import qualified Opaleye.Table as O (Table, table, tableWithSchema)
 
 
 -- opaleye-x -----------------------------------------------------------------
@@ -57,18 +56,18 @@ type Table a = O.Table a (CollectOptional a)
 
 ------------------------------------------------------------------------------
 table :: Properties a => ([String] -> String) -> String -> Table a
-table mangler s = O.Table s (properties mangler)
+table mangler s = O.table s (properties mangler)
 
 
 ------------------------------------------------------------------------------
 tableWithSchema :: Properties a
     => ([String] -> String) -> String -> String -> Table a
-tableWithSchema mangler n s = O.TableWithSchema n s (properties mangler)
+tableWithSchema mangler n s = O.tableWithSchema n s (properties mangler)
 
 
 ------------------------------------------------------------------------------
 newtype PropertiesPP a b =
-    PropertiesPP ([String] -> ([String] -> String) -> TableProperties a b)
+    PropertiesPP ([String] -> ([String] -> String) -> TableColumns a b)
 
 
 ------------------------------------------------------------------------------
@@ -130,13 +129,10 @@ instance __OVERLAPPABLE__ Show a => ShowVal a where
 
 
 ------------------------------------------------------------------------------
-type Properties a =
-    ( Default PropertiesPP a (CollectOptional a)
-    , Default ColumnMaker (CollectOptional a) (CollectOptional a)
-    )
+type Properties a = Default PropertiesPP a (CollectOptional a)
 
 
 ------------------------------------------------------------------------------
 properties :: Properties a
-    => ([String] -> String) -> TableProperties a (CollectOptional a)
+    => ([String] -> String) -> TableColumns a (CollectOptional a)
 properties = let PropertiesPP p = def in p []
