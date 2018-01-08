@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
@@ -12,7 +13,7 @@
 {-# OPTIONS_GHC -fno-warn-orphans #-}
 
 module Opaleye.X.Array
-    ( PGArray
+    ( PGArray, PGNil, pgNil, PGSingleton, pgSingleton
     , PGFromList, pgFromList
     , ArrayAgg, arrayAgg
     )
@@ -28,6 +29,7 @@ import           Opaleye.Aggregate (Aggregator)
 import qualified Opaleye.Aggregate as O (arrayAgg)
 import           Opaleye.Column (Column)
 import           Opaleye.Constant (Constant)
+import           Opaleye.Operators (emptyArray, singletonArray)
 import           Opaleye.PGTypes (IsSqlType, pgArray)
 import qualified Opaleye.PGTypes as O (PGArray)
 import           Opaleye.RunQuery (QueryRunner)
@@ -42,7 +44,7 @@ import           Data.Profunctor (Profunctor, dimap, lmap, rmap)
 
 
 -- product-profunctors -------------------------------------------------------
-import           Data.Profunctor.Product (ProductProfunctor)
+import           Data.Profunctor.Product (ProductProfunctor, (***!), empty)
 import           Data.Profunctor.Product.Default (Default, def)
 
 
@@ -91,6 +93,71 @@ instance (PGArrays p ps, Default (R [] QueryRunner) ps a) =>
 instance IsSqlType a => Default (L [] (->)) (Column a) (Column (O.PGArray a))
   where
     def = L (pgArray id)
+
+
+------------------------------------------------------------------------------
+newtype NilPP a b = NilPP b
+
+
+------------------------------------------------------------------------------
+instance Profunctor NilPP where
+    dimap _ r (NilPP p) = NilPP (r p)
+
+
+------------------------------------------------------------------------------
+instance ProductProfunctor NilPP where
+    empty = NilPP ()
+    NilPP a ***! NilPP b = NilPP (a, b)
+
+
+------------------------------------------------------------------------------
+instance IsSqlType a =>
+    Default NilPP (Column (O.PGArray a)) (Column (O.PGArray a))
+  where
+    def = NilPP emptyArray
+
+
+------------------------------------------------------------------------------
+type PGNil a =
+    ( PGArrays a (DistributePGArray a)
+    , Default NilPP (DistributePGArray a) (DistributePGArray a)
+    )
+
+
+------------------------------------------------------------------------------
+pgNil :: forall a. PGNil a => PGArray a
+pgNil = let NilPP n = p in PGArray n
+  where
+    p = def :: NilPP (DistributePGArray a) (DistributePGArray a)
+
+
+------------------------------------------------------------------------------
+newtype SingletonPP a b = SingletonPP (a -> b)
+  deriving (Profunctor, ProductProfunctor)
+
+
+------------------------------------------------------------------------------
+instance IsSqlType a => Default SingletonPP (Column a) (Column (O.PGArray a))
+  where
+    def = SingletonPP singletonArray
+
+
+------------------------------------------------------------------------------
+instance Default SingletonPP (Column (O.PGArray a)) (Column (O.PGArray a))
+  where
+    def = SingletonPP id
+
+
+------------------------------------------------------------------------------
+type PGSingleton a =
+    ( PGArrays a (DistributePGArray a)
+    , Default SingletonPP a (DistributePGArray a)
+    )
+
+
+------------------------------------------------------------------------------
+pgSingleton :: PGSingleton a => a -> PGArray a
+pgSingleton = let SingletonPP f = def in PGArray . f
 
 
 ------------------------------------------------------------------------------
