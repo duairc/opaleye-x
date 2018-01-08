@@ -9,26 +9,23 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Opaleye.X.Transaction
-    ( Transaction
-    , transaction
+    ( Transaction, transaction
 
-    , query
-    , queryFirst
+    , Run, one, only, many, some
+    , query, count
+    , Select, selected, selecting, parse, select
 
-    , insert
-    , insertReturning
-
-    , update
-    , updateReturning
-
+    , insert, insertReturning
+    , update, updateReturning
     , delete
 
-    , getCurrentTime
+    , getCurrentTime, nextUUID, nextRandom
     )
 where
 
@@ -42,13 +39,14 @@ import           Control.Exception
                      , PatternMatchFail (PatternMatchFail)
                      , SomeException
                      )
-import           Control.Monad (MonadPlus, mzero, mplus)
+import           Control.Monad (MonadPlus, mzero, mplus, (>=>))
 #if MIN_VERSION_base(4, 9, 0)
 import           Control.Monad.Fail (MonadFail)
 import qualified Control.Monad.Fail as F (fail)
 #endif
 import           Control.Monad.Fix (MonadFix)
-import           Data.Maybe (listToMaybe)
+import           Data.Functor.Identity (Identity (Identity), runIdentity)
+import           Data.List.NonEmpty (NonEmpty, nonEmpty)
 #if !MIN_VERSION_base(4, 8, 0)
 import           Data.Monoid (Monoid, mappend, mempty)
 #endif
@@ -72,6 +70,7 @@ import           Monad.Try (onException)
 
 
 -- opaleye -------------------------------------------------------------------
+import           Opaleye.Aggregate (countRows)
 import           Opaleye.Manipulation
                      ( runInsertMany
                      , runInsertManyReturning
@@ -80,8 +79,10 @@ import           Opaleye.Manipulation
                      , runDelete
                      )
 import           Opaleye.Order (limit)
-import           Opaleye.QueryArr (QueryArr)
-import           Opaleye.RunQuery (runQuery)
+import           Opaleye.QueryArr (Query)
+import           Opaleye.RunQuery
+                     ( QueryRunner, runQueryExplicit, runQueryFoldExplicit
+                     )
 
 
 -- opaleye-x -----------------------------------------------------------------
@@ -105,7 +106,13 @@ import           Database.PostgreSQL.Simple.Transaction
 
 
 -- profunctors ---------------------------------------------------------------
-import           Data.Profunctor (lmap)
+import           Data.Profunctor (Profunctor, Star (Star))
+import           Data.Profunctor.Composition (Procompose (Procompose))
+
+
+-- product-profunctors -------------------------------------------------------
+import           Data.Profunctor.Product (ProductProfunctor, purePP, (****))
+import           Data.Profunctor.Product.Default (def)
 
 
 -- time ----------------------------------------------------------------------
@@ -116,6 +123,12 @@ import qualified Data.Time.Clock as T (getCurrentTime)
 -- transformers --------------------------------------------------------------
 import           Control.Monad.Trans.Reader (ReaderT (ReaderT))
 import           Control.Monad.Trans.Except (ExceptT (ExceptT))
+
+
+-- uuid ----------------------------------------------------------------------
+import           Data.UUID (UUID)
+import qualified Data.UUID.V1 as U (nextUUID)
+import qualified Data.UUID.V4 as U (nextRandom)
 
 
 ------------------------------------------------------------------------------
@@ -215,15 +228,91 @@ liftE e = lift (try' e) >>= either throw return
 
 
 ------------------------------------------------------------------------------
-query :: (PGIn a a', PGOut b' b)  => a -> QueryArr a' b' -> Transaction [b]
-query a q = Transaction . ReaderT $ \c -> liftE $
-    runQuery c $ lmap (const (pg a)) q
+type Run f = forall p a. QueryRunner p a -> Query p -> Transaction (f a)
 
 
 ------------------------------------------------------------------------------
-queryFirst :: (PGIn a a', PGOut b' b)
-    => a -> QueryArr a' b' -> Transaction (Maybe b)
-queryFirst a = fmap listToMaybe . query () . limit 1 . lmap (const (pg a))
+one :: Run Maybe
+one runner q = Transaction . ReaderT $ \connection -> liftE $
+    runQueryFoldExplicit runner connection (limit 1 q) Nothing
+        (const (pure . Just))
+
+
+------------------------------------------------------------------------------
+only :: Run Identity
+only runner q = do
+    result <- one runner q
+    case result of
+        Nothing -> throw SelectRecordNotFound
+        Just a -> pure $ Identity a
+
+
+------------------------------------------------------------------------------
+many :: Run []
+many runner q = Transaction . ReaderT $ \connection -> liftE $
+    runQueryExplicit runner connection q
+
+
+------------------------------------------------------------------------------
+some :: Run NonEmpty
+some runner q = do
+    result <- many runner q
+    case nonEmpty result of
+        Nothing -> throw SelectRecordNotFound
+        Just a -> pure a
+
+
+------------------------------------------------------------------------------
+query :: PGOut p a => Run f -> Query p -> Transaction (f a)
+query run = run def
+
+
+------------------------------------------------------------------------------
+count :: Query p -> Transaction Int64
+count = fmap runIdentity . only def . countRows
+
+
+------------------------------------------------------------------------------
+data SelectException = SelectParseError String | SelectRecordNotFound
+  deriving (Eq, Ord, Read, Show, Generic, Typeable)
+instance Exception SelectException
+
+
+------------------------------------------------------------------------------
+newtype Select p a =
+    Select (Procompose (Star (Either String)) QueryRunner p a)
+  deriving (Functor, Profunctor, ProductProfunctor)
+
+
+------------------------------------------------------------------------------
+instance Applicative (Select a) where
+    pure = purePP
+    (<*>) = (****)
+
+
+------------------------------------------------------------------------------
+selected :: PGOut p a => Select p a
+selected = selecting def
+
+
+------------------------------------------------------------------------------
+selecting :: QueryRunner p a -> Select p a
+selecting = Select . Procompose (Star Right)
+
+
+------------------------------------------------------------------------------
+parse :: (a -> Either String b) -> Select p a -> Select p b
+parse f (Select (Procompose (Star p) q)) =
+    Select (Procompose (Star (p >=> f)) q)
+
+
+------------------------------------------------------------------------------
+select :: Traversable f => Run f -> Select p a -> Query p -> Transaction (f a)
+select run (Select (Procompose (Star parser) runner)) q = do
+    result <- traverse parser <$> run runner q
+    case result of
+        Left message -> throw (SelectParseError message)
+        Right as -> pure as
 
 
 ------------------------------------------------------------------------------
@@ -259,21 +348,6 @@ updateReturning :: (Optionalize rs ws, PGOut p a)
 updateReturning t f p g = Transaction . ReaderT $ \c -> liftE $
     runUpdateReturning c t (f . optionalize) p g
 
-{-
-------------------------------------------------------------------------------
-upsert :: PGIn as ws => Table ws -> [as] -> (ws -> ws) -> Transaction Int64
-upsert = undefined
-
-
-------------------------------------------------------------------------------
-upsertReturning :: (PGIn as ws, Optionalize rs ws, PGOut p a)
-    => Table ws
-    -> [as]
-    -> (ws -> ws)
-    -> (rs -> p)
-    -> Transaction [a]
-upsertReturning = undefined
--}
 
 ------------------------------------------------------------------------------
 delete
@@ -285,4 +359,14 @@ delete t f = Transaction . ReaderT $ \c -> liftE $ runDelete c t f
 
 ------------------------------------------------------------------------------
 getCurrentTime :: Transaction UTCTime
-getCurrentTime = Transaction $ lift $ lift $ T.getCurrentTime
+getCurrentTime = Transaction $ lift $ lift T.getCurrentTime
+
+
+------------------------------------------------------------------------------
+nextUUID :: Transaction (Maybe UUID)
+nextUUID = Transaction $ lift $ lift U.nextUUID
+
+
+------------------------------------------------------------------------------
+nextRandom :: Transaction UUID
+nextRandom = Transaction $ lift $ lift U.nextRandom

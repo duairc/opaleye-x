@@ -80,8 +80,8 @@ import           Data.Time.Clock (UTCTime)
 import           Data.Time.LocalTime (LocalTime, TimeOfDay)
 
 
--- uuid-types ----------------------------------------------------------------
-import           Data.UUID.Types (UUID)
+-- uuid ----------------------------------------------------------------------
+import           Data.UUID (UUID)
 
 
 ------------------------------------------------------------------------------
