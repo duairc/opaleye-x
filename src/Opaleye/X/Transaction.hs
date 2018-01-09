@@ -3,7 +3,7 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE ExplicitForAll #-}
+{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -19,6 +19,7 @@ module Opaleye.X.Transaction
 
     , Run, one, only, many, some
     , query, count
+    , SelectException (SelectParseError, SelectRecordNotFound)
     , Select, selected, selecting, parse, select
 
     , insert, insertReturning
@@ -45,6 +46,7 @@ import           Control.Monad.Fail (MonadFail)
 import qualified Control.Monad.Fail as F (fail)
 #endif
 import           Control.Monad.Fix (MonadFix)
+import           Data.Bifunctor (bimap)
 import           Data.Functor.Identity (Identity (Identity), runIdentity)
 import           Data.List.NonEmpty (NonEmpty, nonEmpty)
 #if !MIN_VERSION_base(4, 8, 0)
@@ -72,10 +74,8 @@ import           Monad.Try (onException)
 -- opaleye -------------------------------------------------------------------
 import           Opaleye.Aggregate (countRows)
 import           Opaleye.Manipulation
-                     ( runInsertMany
-                     , runInsertManyReturning
-                     , runUpdate
-                     , runUpdateReturning
+                     ( runInsertMany, runInsertManyReturning
+                     , runUpdate, runUpdateReturning
                      , runDelete
                      )
 import           Opaleye.Order (limit)
@@ -106,12 +106,12 @@ import           Database.PostgreSQL.Simple.Transaction
 
 
 -- profunctors ---------------------------------------------------------------
-import           Data.Profunctor (Profunctor, Star (Star))
-import           Data.Profunctor.Composition (Procompose (Procompose))
+import           Data.Profunctor (Profunctor, dimap, lmap, rmap)
 
 
 -- product-profunctors -------------------------------------------------------
-import           Data.Profunctor.Product (ProductProfunctor, purePP, (****))
+import           Data.Profunctor.Product (ProductProfunctor, purePP, (****), (***$))
+import           Data.Profunctor.Product (SumProfunctor, (+++!))
 import           Data.Profunctor.Product.Default (def)
 
 
@@ -129,6 +129,24 @@ import           Control.Monad.Trans.Except (ExceptT (ExceptT))
 import           Data.UUID (UUID)
 import qualified Data.UUID.V1 as U (nextUUID)
 import qualified Data.UUID.V4 as U (nextRandom)
+
+
+------------------------------------------------------------------------------
+(&&&) :: ProductProfunctor p => p a b -> p a c -> p a (b, c)
+f &&& g = (,) ***$ f **** g
+infixr 3 &&&
+
+
+------------------------------------------------------------------------------
+(***) :: ProductProfunctor p => p a b -> p c d -> p (a, c) (b, d)
+f *** g = dimap fst (,) f **** lmap snd g
+infixr 3 ***
+
+
+------------------------------------------------------------------------------
+(+++) :: SumProfunctor p => p a b -> p c d -> p (Either a c) (Either b d)
+(+++) = (+++!)
+infixr 2 +++
 
 
 ------------------------------------------------------------------------------
@@ -279,9 +297,33 @@ instance Exception SelectException
 
 
 ------------------------------------------------------------------------------
-newtype Select p a =
-    Select (Procompose (Star (Either String)) QueryRunner p a)
-  deriving (Functor, Profunctor, ProductProfunctor)
+data Select p a = forall q b.
+    Select !(p -> q) !(QueryRunner q b) !(b -> Either String a)
+
+
+------------------------------------------------------------------------------
+instance Profunctor Select where
+    dimap f g (Select l q r) = Select (l . f) q (fmap g . r)
+
+
+------------------------------------------------------------------------------
+instance ProductProfunctor Select where
+    purePP = Select id (purePP ()) . const . pure
+    Select lf qf rf **** Select la qa ra = Select (lf &&& la) (qf *** qa) go
+      where
+        go (f, a) = rf f <*> ra a
+
+
+------------------------------------------------------------------------------
+instance SumProfunctor Select where
+    Select lf qf rf +++! Select la qa ra = Select (bimap lf la) (qf +++ qa) go
+      where
+        go = rmap (either (fmap Left) (fmap Right)) $ rf +++ ra
+
+
+------------------------------------------------------------------------------
+instance Functor (Select a) where
+    fmap = rmap
 
 
 ------------------------------------------------------------------------------
@@ -297,19 +339,18 @@ selected = selecting def
 
 ------------------------------------------------------------------------------
 selecting :: QueryRunner p a -> Select p a
-selecting = Select . Procompose (Star Right)
+selecting runner = Select id runner pure
 
 
 ------------------------------------------------------------------------------
 parse :: (a -> Either String b) -> Select p a -> Select p b
-parse f (Select (Procompose (Star p) q)) =
-    Select (Procompose (Star (p >=> f)) q)
+parse f (Select l q r) = Select l q (r >=> f)
 
 
 ------------------------------------------------------------------------------
 select :: Traversable f => Run f -> Select p a -> Query p -> Transaction (f a)
-select run (Select (Procompose (Star parser) runner)) q = do
-    result <- traverse parser <$> run runner q
+select run (Select projection runner parser) q = do
+    result <- traverse parser <$> run runner (rmap projection q)
     case result of
         Left message -> throw (SelectParseError message)
         Right as -> pure as
