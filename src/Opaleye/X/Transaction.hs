@@ -25,8 +25,6 @@ module Opaleye.X.Transaction
     , insert, insertReturning
     , update, updateReturning
     , delete
-
-    , getCurrentTime, nextUUID, nextRandom
     )
 where
 
@@ -35,17 +33,13 @@ import           Control.Applicative (Alternative, (<|>), empty)
 #if !MIN_VERSION_base(4, 8, 0)
 import           Control.Applicative (Applicative, pure)
 #endif
-import           Control.Exception
-                     ( Exception
-                     , PatternMatchFail (PatternMatchFail)
-                     , SomeException
-                     )
-import           Control.Monad (MonadPlus, mzero, mplus, (>=>))
+import           Control.Exception (Exception, SomeException)
+import           Control.Monad (MonadPlus, (>=>))
 #if MIN_VERSION_base(4, 9, 0)
 import           Control.Monad.Fail (MonadFail)
-import qualified Control.Monad.Fail as F (fail)
 #endif
 import           Control.Monad.Fix (MonadFix)
+import           Control.Monad.IO.Class (MonadIO)
 import           Data.Bifunctor (bimap)
 import           Data.Functor.Identity (Identity (Identity), runIdentity)
 import           Data.List.NonEmpty (NonEmpty, nonEmpty)
@@ -59,16 +53,11 @@ import           GHC.Generics (Generic, Generic1)
 
 
 -- layers --------------------------------------------------------------------
-import           Control.Monad.Lift (lift)
+import           Control.Monad.Lift (MonadInner)
 import           Control.Monad.Lift.Base (MonadBase)
-import           Control.Monad.Lift.IO (MonadIO, liftIO)
 import           Monad.Abort (MonadAbort)
-import           Monad.Catch (catch, try)
-import           Monad.Mask (mask)
-import           Monad.Reader (MonadReader, ask)
 import           Monad.Recover (MonadRecover, recover)
 import           Monad.Throw (throw)
-import           Monad.Try (onException)
 
 
 -- opaleye -------------------------------------------------------------------
@@ -92,17 +81,8 @@ import           Opaleye.X.Table (Table)
 
 
 -- postgresql-simple ---------------------------------------------------------
-import           Database.PostgreSQL.Simple
-                     ( Connection
-                     , SqlError
-                     , withTransaction
-                     )
-import           Database.PostgreSQL.Simple.Transaction
-                     ( isFailedTransactionError
-                     , newSavepoint
-                     , releaseSavepoint
-                     , rollbackToAndReleaseSavepoint
-                     )
+import           Database.PostgreSQL.Simple (Connection, withTransaction)
+import           Database.PostgreSQL.Simple.Transaction (withSavepoint)
 
 
 -- profunctors ---------------------------------------------------------------
@@ -110,25 +90,15 @@ import           Data.Profunctor (Profunctor, dimap, lmap, rmap)
 
 
 -- product-profunctors -------------------------------------------------------
-import           Data.Profunctor.Product (ProductProfunctor, purePP, (****), (***$))
+import           Data.Profunctor.Product
+                     ( ProductProfunctor, purePP, (****), (***$)
+                     )
 import           Data.Profunctor.Product (SumProfunctor, (+++!))
 import           Data.Profunctor.Product.Default (def)
 
 
--- time ----------------------------------------------------------------------
-import           Data.Time.Clock (UTCTime)
-import qualified Data.Time.Clock as T (getCurrentTime)
-
-
 -- transformers --------------------------------------------------------------
 import           Control.Monad.Trans.Reader (ReaderT (ReaderT))
-import           Control.Monad.Trans.Except (ExceptT (ExceptT))
-
-
--- uuid ----------------------------------------------------------------------
-import           Data.UUID (UUID)
-import qualified Data.UUID.V1 as U (nextUUID)
-import qualified Data.UUID.V4 as U (nextRandom)
 
 
 ------------------------------------------------------------------------------
@@ -150,76 +120,27 @@ infixr 2 +++
 
 
 ------------------------------------------------------------------------------
-data Zero = Zero
-  deriving (Show, Typeable, Generic)
-instance Exception Zero
+transaction :: Transaction a -> Connection -> IO a
+transaction (Transaction (ReaderT f)) c = withTransaction c (f c)
 
 
 ------------------------------------------------------------------------------
-transaction :: (MonadReader Connection m, MonadIO m) => Transaction a -> m a
-transaction (Transaction (ReaderT f)) = ask >>= \connection -> do
-    let ExceptT e = f connection
-    liftIO (withTransaction connection (e >>= either throw return))
-
-
-------------------------------------------------------------------------------
-newtype Transaction a =
-    Transaction (ReaderT Connection (ExceptT SomeException IO) a)
+newtype Transaction a = Transaction (ReaderT Connection IO a)
   deriving
-    ( Functor, Applicative, MonadFix, Typeable, Generic, Generic1
-    , MonadAbort SomeException
+    ( Functor, Applicative, Monad, Alternative, MonadPlus, MonadFix
+    , Typeable, Generic, Generic1, MonadAbort SomeException, MonadIO
+    , MonadInner IO
+#if MIN_VERSION_base(4, 9, 0)
+    , MonadFail
+#endif
     )
 
 
 ------------------------------------------------------------------------------
-instance Monad Transaction where
-    return = pure
-    Transaction m >>= f = let f' a = let Transaction b = f a in b in
-        Transaction $ m >>= f'
-    fail = throw . PatternMatchFail
-
-
-#if MIN_VERSION_base(4, 9, 0)
-------------------------------------------------------------------------------
-instance MonadFail Transaction where
-    fail = throw . PatternMatchFail
-
-
-#endif
-------------------------------------------------------------------------------
-instance Alternative Transaction where
-    empty = throw Zero
-    a <|> b = a `recover` (\e -> b `catch` (\Zero -> throw e))
-
-
-------------------------------------------------------------------------------
-instance MonadPlus Transaction where
-    mzero = empty
-    mplus = (<|>)
-
-
-------------------------------------------------------------------------------
 instance MonadRecover SomeException Transaction where
-    recover (Transaction (ReaderT m)) handler =
-        Transaction $ ReaderT $ \connection -> ExceptT $ mask $ \restore -> do
-            savepoint <- newSavepoint connection
-            e <- restore (let ExceptT m' = m connection in m') `onException`
-                rollbackToAndReleaseSavepoint connection savepoint
-            case e of
-                Left x -> do
-                    rollbackToAndReleaseSavepoint connection savepoint
-                    let Transaction (ReaderT m') = handler x
-                    let ExceptT m'' = m' connection
-                    m''
-                Right a -> do
-                    releaseSavepoint connection savepoint `catch` \x ->
-                        if isFailedTransactionError x
-                            then do
-                                rollbackToAndReleaseSavepoint
-                                    connection
-                                    savepoint
-                            else throw x
-                    pure (Right a)
+    recover (Transaction (ReaderT f)) handler = Transaction $ ReaderT $ \c ->
+        withSavepoint c (f c) `recover` \e ->
+            let Transaction (ReaderT g) = handler e in g c
 
 
 ------------------------------------------------------------------------------
@@ -238,22 +159,13 @@ instance MonadBase Transaction Transaction
 
 
 ------------------------------------------------------------------------------
-liftE :: IO a -> ExceptT SomeException IO a
-liftE e = lift (try' e) >>= either throw return
-  where
-    try' :: IO a -> IO (Either SqlError a)
-    try' = try
-
-
-------------------------------------------------------------------------------
 type Run f = forall p a. QueryRunner p a -> Query p -> Transaction (f a)
 
 
 ------------------------------------------------------------------------------
 one :: Run Maybe
-one runner q = Transaction . ReaderT $ \connection -> liftE $
-    runQueryFoldExplicit runner connection (limit 1 q) Nothing
-        (const (pure . Just))
+one runner q = Transaction . ReaderT $ \c ->
+    runQueryFoldExplicit runner c (limit 1 q) Nothing (const (pure . Just))
 
 
 ------------------------------------------------------------------------------
@@ -267,8 +179,7 @@ only runner q = do
 
 ------------------------------------------------------------------------------
 many :: Run []
-many runner q = Transaction . ReaderT $ \connection -> liftE $
-    runQueryExplicit runner connection q
+many runner = Transaction . ReaderT . flip (runQueryExplicit runner)
 
 
 ------------------------------------------------------------------------------
@@ -358,14 +269,13 @@ select run (Select projection runner parser) q = do
 
 ------------------------------------------------------------------------------
 insert :: PGIn as ws => Table ws -> [as] -> Transaction Int64
-insert t as = Transaction . ReaderT $ \c ->
-    liftE $ runInsertMany c t (map pg as)
+insert t as = Transaction . ReaderT $ \c -> runInsertMany c t (map pg as)
 
 
 ------------------------------------------------------------------------------
 insertReturning :: (Optionalize rs ws, PGIn as ws, PGOut p a)
     => Table ws -> (rs -> p) -> [as] -> Transaction [a]
-insertReturning t f as = Transaction . ReaderT $ \c -> liftE $
+insertReturning t f as = Transaction . ReaderT $ \c ->
     runInsertManyReturning c t (map pg as) f
 
 
@@ -375,7 +285,7 @@ update :: Optionalize rs ws
     -> (ws -> ws)
     -> (rs -> PG Bool)
     -> Transaction Int64
-update t f p = Transaction . ReaderT $ \c -> liftE $
+update t f p = Transaction . ReaderT $ \c ->
     runUpdate c t (f . optionalize) p
 
 
@@ -386,7 +296,7 @@ updateReturning :: (Optionalize rs ws, PGOut p a)
     -> (rs -> PG Bool)
     -> (rs -> p)
     -> Transaction [a]
-updateReturning t f p g = Transaction . ReaderT $ \c -> liftE $
+updateReturning t f p g = Transaction . ReaderT $ \c ->
     runUpdateReturning c t (f . optionalize) p g
 
 
@@ -395,19 +305,4 @@ delete
     :: Optionalize rs ws => Table ws
     -> (rs -> PG Bool)
     -> Transaction Int64
-delete t f = Transaction . ReaderT $ \c -> liftE $ runDelete c t f
-
-
-------------------------------------------------------------------------------
-getCurrentTime :: Transaction UTCTime
-getCurrentTime = Transaction $ lift $ lift T.getCurrentTime
-
-
-------------------------------------------------------------------------------
-nextUUID :: Transaction (Maybe UUID)
-nextUUID = Transaction $ lift $ lift U.nextUUID
-
-
-------------------------------------------------------------------------------
-nextRandom :: Transaction UUID
-nextRandom = Transaction $ lift $ lift U.nextRandom
+delete t f = Transaction . ReaderT $ \c -> runDelete c t f
