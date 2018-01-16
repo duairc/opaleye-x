@@ -83,6 +83,17 @@ instance (Default QueryRunner (Column (O.PGArray p)) [a]) =>
 
 
 ------------------------------------------------------------------------------
+instance
+    ( Default QueryRunner (Column (O.PGArray ps)) [Maybe a]
+    , ps ~ DistributeNullableInner p
+    )
+  =>
+    Default (R [] QueryRunner) (PGMaybe (Column (O.PGArray p))) (Maybe a)
+  where
+    def = R $ lmap (\(PGMaybe a) -> a) def
+
+
+------------------------------------------------------------------------------
 instance (PGArrays p ps, Default (R [] QueryRunner) ps a) =>
     Default QueryRunner (PGArray p) [a]
   where

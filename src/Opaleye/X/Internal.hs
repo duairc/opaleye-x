@@ -305,7 +305,7 @@ type family DistributePGArray a :: * where
     DistributePGArray (PGMaybe a) = PGMaybe (DistributePGArray a)
     DistributePGArray (Option a) = Option (DistributePGArray a)
     DistributePGArray (Optional a) = Optional (DistributePGArray a)
-    DistributePGArray (Column a) = Column (O.PGArray a)
+    DistributePGArray (Column a) = Column (DistributePGArrayInner a)
 
 
 ------------------------------------------------------------------------------
@@ -320,6 +320,15 @@ type family MapSndDistributePGArray (as :: [(k, *)]) :: [(k, *)] where
     MapSndDistributePGArray '[] = '[]
     MapSndDistributePGArray ('(s, a) ': as) =
         '(s, DistributePGArray a) ': MapSndDistributePGArray as
+
+
+------------------------------------------------------------------------------
+type family DistributePGArrayInner a :: * where
+    DistributePGArrayInner (O.PGArray a) =
+        O.PGArray (DistributePGArrayInner a)
+    DistributePGArrayInner (Nullable a) =
+        Nullable (DistributePGArrayInner a)
+    DistributePGArrayInner a = O.PGArray a
 
 
 ------------------------------------------------------------------------------
@@ -371,7 +380,7 @@ type family CollectPGArray a :: * where
     CollectPGArray (PGMaybe a) = PGMaybe (CollectPGArray a)
     CollectPGArray (Option a) = Option (CollectPGArray a)
     CollectPGArray (Optional a) = Optional (CollectPGArray a)
-    CollectPGArray (Column (O.PGArray a)) = Column a
+    CollectPGArray (Column a) = Column (CollectPGArrayInner a)
 
 
 ------------------------------------------------------------------------------
@@ -385,6 +394,16 @@ type family MapSndCollectPGArray (as :: [(k, *)]) :: [(k, *)] where
     MapSndCollectPGArray '[] = '[]
     MapSndCollectPGArray ('(s, a) ': as)
         = '(s, CollectPGArray a) ': MapSndCollectPGArray as
+
+
+------------------------------------------------------------------------------
+type family CollectPGArrayInner a :: * where
+    CollectPGArrayInner (Nullable a) = Nullable (CollectPGArrayInner a)
+    CollectPGArrayInner (O.PGArray (Nullable a)) =
+        O.PGArray (CollectPGArrayInner (Nullable a))
+    CollectPGArrayInner (O.PGArray (O.PGArray a)) =
+        O.PGArray (CollectPGArrayInner (O.PGArray a))
+    CollectPGArrayInner (O.PGArray a) = a
 
 
 ------------------------------------------------------------------------------
@@ -444,7 +463,7 @@ type family DistributeNullable a :: * where
     DistributeNullable (PGMaybe a) = PGMaybe a
     DistributeNullable (Option a) = Option (DistributeNullable a)
     DistributeNullable (Optional a) = Optional (DistributeNullable a)
-    DistributeNullable (Column a) = Column (Nullable a)
+    DistributeNullable (Column a) = Column (DistributeNullableInner a)
 
 
 ------------------------------------------------------------------------------
@@ -459,6 +478,15 @@ type family MapSndDistributeNullable (as :: [(k, *)]) :: [(k, *)] where
     MapSndDistributeNullable '[] = '[]
     MapSndDistributeNullable ('(s, a) ': as) =
         '(s, DistributeNullable a) ': MapSndDistributeNullable as
+
+
+------------------------------------------------------------------------------
+type family DistributeNullableInner a :: * where
+    DistributeNullableInner (Nullable a) =
+        Nullable (DistributeNullableInner a)
+    DistributeNullableInner (O.PGArray a) =
+        O.PGArray (DistributeNullableInner a)
+    DistributeNullableInner a = Nullable a
 
 
 ------------------------------------------------------------------------------
@@ -510,7 +538,7 @@ type family CollectNullable a :: * where
     CollectNullable (PGMaybe a) = PGMaybe a
     CollectNullable (Option a) = Option (CollectNullable a)
     CollectNullable (Optional a) = Optional (CollectNullable a)
-    CollectNullable (Column (Nullable a)) = Column a
+    CollectNullable (Column a) = Column (CollectNullableInner a)
 
 
 ------------------------------------------------------------------------------
@@ -524,6 +552,16 @@ type family MapSndCollectNullable (as :: [(k, *)]) :: [(k, *)] where
     MapSndCollectNullable '[] = '[]
     MapSndCollectNullable ('(s, a) ': as) =
         '(s, CollectNullable a) ': MapSndCollectNullable as
+
+
+------------------------------------------------------------------------------
+type family CollectNullableInner a :: * where
+    CollectNullableInner (O.PGArray a) = O.PGArray (CollectNullableInner a)
+    CollectNullableInner (Nullable (O.PGArray a)) =
+        Nullable (CollectNullableInner (O.PGArray a))
+    CollectNullableInner (Nullable (Nullable a)) =
+        Nullable (CollectNullableInner (Nullable a))
+    CollectNullableInner (Nullable a) = a
 
 
 ------------------------------------------------------------------------------
