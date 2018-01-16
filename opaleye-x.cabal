@@ -32,6 +32,7 @@ library
     Opaleye.X.Maybe
     Opaleye.X.Optional
     Opaleye.X.Order
+    Opaleye.X.Select
     Opaleye.X.Table
     Opaleye.X.TF
     Opaleye.X.Transaction
