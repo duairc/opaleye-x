@@ -1,21 +1,17 @@
 {-# LANGUAGE CPP #-}
-{-# LANGUAGE ConstraintKinds #-}
-{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
-{-# LANGUAGE ExistentialQuantification #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
-{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 
 module Opaleye.X.Transaction
-    ( Transaction, transaction
+    ( TransactionT, Transaction, transaction
     , Run, one, only, many, some
     , query, count
     , insert, insertReturning
@@ -26,10 +22,11 @@ module Opaleye.X.Transaction
 where
 
 -- base ----------------------------------------------------------------------
-import           Control.Applicative (Alternative, (<|>), empty)
+import           Control.Applicative (Alternative)
 #if !MIN_VERSION_base(4, 8, 0)
 import           Control.Applicative (Applicative, pure)
 #endif
+import           Control.Applicative (liftA2)
 import           Control.Exception (Exception, SomeException)
 import           Control.Monad (MonadPlus)
 #if MIN_VERSION_base(4, 9, 0)
@@ -49,11 +46,17 @@ import           GHC.Generics (Generic, Generic1)
 
 
 -- layers --------------------------------------------------------------------
-import           Control.Monad.Lift (MonadInner)
-import           Control.Monad.Lift.Base (MonadBase)
-import           Monad.Abort (MonadAbort)
+import           Control.Monad.Lift
+                     ( MonadTrans, MInvariant, MFunctor
+                     , MonadTransControl, LayerResult, LayerState
+                     , suspend, resume, capture, extract
+                     , MonadInner, liftI
+                     )
+import           Monad.Catch (catch, handle)
+import           Monad.Mask (MonadMask, mask)
 import           Monad.Recover (MonadRecover, recover)
-import           Monad.Throw (throw)
+import           Monad.Throw (MonadThrow, throw)
+import           Monad.Try (MonadTry, onException)
 
 
 -- opaleye -------------------------------------------------------------------
@@ -77,8 +80,12 @@ import           Opaleye.X.Table (Table)
 
 
 -- postgresql-simple ---------------------------------------------------------
-import           Database.PostgreSQL.Simple (Connection, withTransaction)
-import           Database.PostgreSQL.Simple.Transaction (withSavepoint)
+import           Database.PostgreSQL.Simple (Connection)
+import           Database.PostgreSQL.Simple.Transaction
+                     ( beginMode, defaultTransactionMode, rollback, commit
+                     , newSavepoint, releaseSavepoint
+                     , rollbackToAndReleaseSavepoint, isFailedTransactionError
+                     )
 
 
 -- product-profunctors -------------------------------------------------------
@@ -96,16 +103,23 @@ instance Exception RecordNotFound
 
 
 ------------------------------------------------------------------------------
-transaction :: Transaction a -> Connection -> IO a
-transaction (Transaction (ReaderT f)) c = withTransaction c (f c)
+transaction :: (MonadInner IO m, MonadMask m, MonadTry m)
+    => TransactionT m a -> Connection -> m a
+transaction (TransactionT (ReaderT f)) connection = mask $ \unmask -> do
+    liftI $ beginMode defaultTransactionMode connection
+    result <- unmask (f connection) `onException` liftI (rollback_ connection)
+    liftI $ commit connection
+    return result
+  where
+    rollback_ = handle (\(_ :: IOError) -> return ()) . rollback
 
 
 ------------------------------------------------------------------------------
-newtype Transaction a = Transaction (ReaderT Connection IO a)
+newtype TransactionT m a = TransactionT (ReaderT Connection m a)
   deriving
     ( Functor, Applicative, Monad, Alternative, MonadPlus, MonadFix
-    , Typeable, Generic, Generic1, MonadAbort SomeException, MonadIO
-    , MonadInner IO
+    , Typeable, Generic, Generic1, MonadIO
+    , MonadTrans, MInvariant, MFunctor
 #if MIN_VERSION_base(4, 9, 0)
     , MonadFail
 #endif
@@ -113,39 +127,71 @@ newtype Transaction a = Transaction (ReaderT Connection IO a)
 
 
 ------------------------------------------------------------------------------
-instance MonadRecover SomeException Transaction where
-    recover (Transaction (ReaderT f)) handler = Transaction $ ReaderT $ \c ->
-        withSavepoint c (f c) `recover` \e ->
-            let Transaction (ReaderT g) = handler e in g c
+instance MonadTransControl TransactionT where
+    suspend (TransactionT m) = suspend m
+    resume = TransactionT . resume
+    capture = TransactionT capture
+    extract _ (Identity a) = Just a
 
 
 ------------------------------------------------------------------------------
-instance Semigroup (Transaction a) where
-    (<>) = (<|>)
+type instance LayerResult TransactionT = LayerResult (ReaderT Connection)
+type instance LayerState TransactionT m = LayerState (ReaderT Connection) m
 
 
 ------------------------------------------------------------------------------
-instance Monoid (Transaction a) where
-    mempty = empty
-    mappend = (<|>)
+instance
+    ( MonadInner IO m, MonadMask m, MonadRecover SomeException m, MonadTry m
+    )
+  =>
+    MonadRecover SomeException (TransactionT m)
+  where
+    recover (TransactionT (ReaderT f)) handler = TransactionT $ ReaderT go
+      where
+        go connection = run `recover` handler'
+          where
+            run = mask $ \unmask -> do
+                savepoint <- liftI $ newSavepoint connection
+                result <- unmask (f connection) `onException`
+                    liftI (rollbackToAndReleaseSavepoint connection savepoint)
+                liftI $ releaseSavepoint connection savepoint `catch` \e ->
+                    if isFailedTransactionError e
+                        then
+                            rollbackToAndReleaseSavepoint connection savepoint
+                        else throw e
+                return result
+            handler' e = g connection
+              where
+                TransactionT (ReaderT g) = handler e
 
 
 ------------------------------------------------------------------------------
-instance MonadBase Transaction Transaction
+instance (Applicative m, Semigroup a) => Semigroup (TransactionT m a) where
+    (<>) = liftA2 (<>)
 
 
 ------------------------------------------------------------------------------
-type Run f = forall p a. QueryRunner p a -> Query p -> Transaction (f a)
+instance (Applicative m, Monoid a) => Monoid (TransactionT m a) where
+    mempty = pure mempty
+    mappend = liftA2 mappend
 
 
 ------------------------------------------------------------------------------
-one :: Run Maybe
-one runner q = Transaction . ReaderT $ \c ->
+type Transaction = TransactionT IO
+
+
+------------------------------------------------------------------------------
+type Run m f = forall p a. QueryRunner p a -> Query p -> TransactionT m (f a)
+
+
+------------------------------------------------------------------------------
+one :: MonadInner IO m => Run m Maybe
+one runner q = TransactionT . ReaderT $ \c -> liftI $
     runQueryFoldExplicit runner c (limit 1 q) Nothing (const (pure . Just))
 
 
 ------------------------------------------------------------------------------
-only :: Run Identity
+only :: (MonadInner IO m, MonadThrow m) => Run m Identity
 only runner q = do
     result <- one runner q
     case result of
@@ -154,12 +200,13 @@ only runner q = do
 
 
 ------------------------------------------------------------------------------
-many :: Run []
-many runner = Transaction . ReaderT . flip (runQueryExplicit runner)
+many :: MonadInner IO m => Run m []
+many runner = TransactionT . ReaderT
+    . flip ((liftI .) . runQueryExplicit runner)
 
 
 ------------------------------------------------------------------------------
-some :: Run NonEmpty
+some :: (MonadInner IO m, MonadThrow m) => Run m NonEmpty
 some runner q = do
     result <- many runner q
     case nonEmpty result of
@@ -168,51 +215,54 @@ some runner q = do
 
 
 ------------------------------------------------------------------------------
-query :: PGOut p a => Run f -> Query p -> Transaction (f a)
+query :: PGOut p a => Run m f -> Query p -> TransactionT m (f a)
 query run = run def
 
 
 ------------------------------------------------------------------------------
-count :: Query p -> Transaction Int64
+count :: (MonadInner IO m, MonadThrow m) => Query p -> TransactionT m Int64
 count = fmap runIdentity . only def . countRows
 
 
 ------------------------------------------------------------------------------
-insert :: PGIn as ws => Table ws -> [as] -> Transaction Int64
-insert t as = Transaction . ReaderT $ \c -> runInsertMany c t (map pg as)
+insert :: (MonadInner IO m, PGIn as ws)
+    => Table ws -> [as] -> TransactionT m Int64
+insert table as = TransactionT . ReaderT $ \connection ->
+    liftI $ runInsertMany connection table (map pg as)
 
 
 ------------------------------------------------------------------------------
-insertReturning :: (Optionalize rs ws, PGIn as ws, PGOut p a)
-    => Table ws -> (rs -> p) -> [as] -> Transaction [a]
-insertReturning t f as = Transaction . ReaderT $ \c ->
-    runInsertManyReturning c t (map pg as) f
+insertReturning :: (MonadInner IO m, Optionalize rs ws, PGIn as ws, PGOut p a)
+    => Table ws -> (rs -> p) -> [as] -> TransactionT m [a]
+insertReturning table f as = TransactionT . ReaderT $ \connection ->
+    liftI $ runInsertManyReturning connection table (map pg as) f
 
 
 ------------------------------------------------------------------------------
-update :: Optionalize rs ws
+update :: (MonadInner IO m, Optionalize rs ws)
     => Table ws
     -> (ws -> ws)
     -> (rs -> PG Bool)
-    -> Transaction Int64
-update t f p = Transaction . ReaderT $ \c ->
-    runUpdate c t (f . optionalize) p
+    -> TransactionT m Int64
+update table f p = TransactionT . ReaderT $ \connection ->
+    liftI $ runUpdate connection table (f . optionalize) p
 
 
 ------------------------------------------------------------------------------
-updateReturning :: (Optionalize rs ws, PGOut p a)
+updateReturning :: (MonadInner IO m, Optionalize rs ws, PGOut p a)
     => Table ws
     -> (ws -> ws)
     -> (rs -> PG Bool)
     -> (rs -> p)
-    -> Transaction [a]
-updateReturning t f p g = Transaction . ReaderT $ \c ->
-    runUpdateReturning c t (f . optionalize) p g
+    -> TransactionT m [a]
+updateReturning table f p g = TransactionT . ReaderT $ \connection ->
+    liftI $ runUpdateReturning connection table (f . optionalize) p g
 
 
 ------------------------------------------------------------------------------
-delete
-    :: Optionalize rs ws => Table ws
+delete :: (MonadInner IO m, Optionalize rs ws)
+    => Table ws
     -> (rs -> PG Bool)
-    -> Transaction Int64
-delete t f = Transaction . ReaderT $ \c -> runDelete c t f
+    -> TransactionT m Int64
+delete table f = TransactionT . ReaderT $ \connection ->
+    liftI $ runDelete connection table f

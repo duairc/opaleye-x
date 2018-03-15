@@ -28,7 +28,8 @@ import           GHC.Generics (Generic, Generic1)
 
 
 -- layers --------------------------------------------------------------------
-import           Monad.Throw (throw)
+import           Control.Monad.Lift (MonadInner)
+import           Monad.Throw (MonadThrow, throw)
 
 
 -- opaleye -------------------------------------------------------------------
@@ -38,7 +39,7 @@ import           Opaleye.QueryArr (Query)
 
 -- opaleye-x -----------------------------------------------------------------
 import           Opaleye.X.TF (PGOut)
-import           Opaleye.X.Transaction (Transaction, Run)
+import           Opaleye.X.Transaction (TransactionT, Run)
 
 
 -- profunctors ---------------------------------------------------------------
@@ -90,7 +91,8 @@ parse f (Select (Procompose (Star p) q)) =
 
 
 ------------------------------------------------------------------------------
-select :: Traversable f => Run f -> Select p a -> Query p -> Transaction (f a)
+select :: (MonadInner IO m, MonadThrow m, Traversable f)
+    => Run m f -> Select p a -> Query p -> TransactionT m (f a)
 select run (Select (Procompose (Star parser) runner)) q = do
     result <- traverse parser <$> run runner q
     case result of
