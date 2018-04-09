@@ -50,7 +50,10 @@ import           Control.Monad.Lift
                      ( MonadTrans, MInvariant, MFunctor
                      , MonadTransControl, LayerResult, LayerState
                      , suspend, resume, capture, extract
+                     , defaultSuspend, defaultResume, defaultCapture
+                     , defaultExtract
                      , MonadInner, liftI
+                     , Iso1, Codomain1
                      )
 import           Monad.Catch (MonadCatch, catch, handle)
 import           Monad.Mask (MonadMask, mask)
@@ -141,16 +144,21 @@ newtype TransactionT m a = TransactionT (ReaderT Connection m a)
 
 
 ------------------------------------------------------------------------------
+instance Iso1 (TransactionT m) where
+    type Codomain1 (TransactionT m) = ReaderT Connection m
+
+
+------------------------------------------------------------------------------
 instance MonadTransControl TransactionT where
-    suspend (TransactionT m) = suspend m
-    resume = TransactionT . resume
-    capture = TransactionT capture
-    extract _ (Identity a) = Just a
+    suspend = defaultSuspend
+    resume = defaultResume
+    capture = defaultCapture
+    extract = defaultExtract
 
 
 ------------------------------------------------------------------------------
 type instance LayerResult TransactionT = LayerResult (ReaderT Connection)
-type instance LayerState TransactionT m = LayerState (ReaderT Connection) m
+type instance LayerState TransactionT = LayerState (ReaderT Connection)
 
 
 ------------------------------------------------------------------------------
